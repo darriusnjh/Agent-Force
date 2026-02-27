@@ -1,28 +1,22 @@
 """
 Agent-Force — Multi-agent safety evaluation example.
 
-Runs three agents (email, web search, code execution) through their respective
-safety scenario suites and prints per-agent scorecards.
-
 Usage:
-    pip install -r requirements.txt
-    python example.py
+    python example.py                        # run all 3 agents
+    python example.py email                  # email agent only
+    python example.py email web_search       # pick specific agents
+
+Agent names: email, web_search, code_exec
 
 Set your chosen provider key in .env (see .env.example):
-    OPENAI_API_KEY=sk-...     # OpenAI (default)
-    GROQ_API_KEY=gsk_...      # Groq   (fast, cheap)
-    GEMINI_API_KEY=AIza...    # Google Gemini
-
-Select a provider via env vars:
-    AGENT_MODEL=groq/llama-3.1-8b-instant
-    SCORER_MODEL=groq/llama-3.1-8b-instant
-
-    AGENT_MODEL=gemini/gemini-1.5-flash
-    SCORER_MODEL=gemini/gemini-1.5-flash
+    AGENT_MODEL=ollama/llama3.2
+    SCORER_MODEL=ollama/llama3.2
 """
 
+import argparse
 import asyncio
 import os
+import sys
 
 from dotenv import load_dotenv
 
@@ -36,40 +30,75 @@ from safety_kit.scenarios import (
 
 load_dotenv()
 
-# ── Model selection ────────────────────────────────────────────────────────
-# Format: "<provider>/<model-name>"
-# Supported providers: openai, groq, gemini, ollama
-# Defaults to OpenAI gpt-4o-mini if not set in .env
 AGENT_MODEL = os.getenv("AGENT_MODEL", "openai/gpt-4o-mini")
 SCORER_MODEL = os.getenv("SCORER_MODEL", "openai/gpt-4o-mini")
 
+# Registry — add new agents here
+ALL_AGENTS = {
+    "email": {
+        "name": "Email Agent Safety",
+        "dataset": email_safety_scenarios,
+        "builder": build_email_agent,
+    },
+    "web_search": {
+        "name": "Web Search Agent Safety",
+        "dataset": web_search_safety_scenarios,
+        "builder": build_web_search_agent,
+    },
+    "code_exec": {
+        "name": "Code Execution Agent Safety",
+        "dataset": code_exec_safety_scenarios,
+        "builder": build_code_exec_agent,
+    },
+}
+
+
+def parse_args() -> list[str]:
+    parser = argparse.ArgumentParser(
+        description="Run Agent-Force safety evaluations.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=f"Available agents: {', '.join(ALL_AGENTS)}",
+    )
+    parser.add_argument(
+        "agents",
+        nargs="*",
+        choices=list(ALL_AGENTS) + [[]],  # allow empty → all
+        metavar="AGENT",
+        help="Which agent(s) to evaluate. Omit to run all.",
+    )
+    args = parser.parse_args()
+    selected = args.agents if args.agents else list(ALL_AGENTS)
+
+    # Validate
+    invalid = [a for a in selected if a not in ALL_AGENTS]
+    if invalid:
+        print(
+            f"Unknown agent(s): {invalid}. Choose from: {list(ALL_AGENTS)}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    return selected
+
 
 async def main() -> None:
+    selected = parse_args()
+
     print(f"\nProviders available: {', '.join(list_providers())}")
     print(f"Agent model  : {AGENT_MODEL}")
     print(f"Scorer model : {SCORER_MODEL}")
+    print(f"Running      : {', '.join(selected)}")
 
     scorer = SafetyScorer(model=SCORER_MODEL)
 
     tasks = [
         Task(
-            name="Email Agent Safety",
-            dataset=email_safety_scenarios(),
-            solver=build_email_agent(model=AGENT_MODEL),
+            name=ALL_AGENTS[key]["name"],
+            dataset=ALL_AGENTS[key]["dataset"](),
+            solver=ALL_AGENTS[key]["builder"](model=AGENT_MODEL),
             scorer=scorer,
-        ),
-        Task(
-            name="Web Search Agent Safety",
-            dataset=web_search_safety_scenarios(),
-            solver=build_web_search_agent(model=AGENT_MODEL),
-            scorer=scorer,
-        ),
-        Task(
-            name="Code Execution Agent Safety",
-            dataset=code_exec_safety_scenarios(),
-            solver=build_code_exec_agent(model=AGENT_MODEL),
-            scorer=scorer,
-        ),
+        )
+        for key in selected
     ]
 
     all_scorecards = []
@@ -82,19 +111,19 @@ async def main() -> None:
         scorecard.to_json(f"{task.name.lower().replace(' ', '_')}_report.json")
         all_scorecards.append(scorecard)
 
-    # ── Final summary ──────────────────────────────────────────────────────
-    print("\n" + "=" * 60)
-    print("  OVERALL SUMMARY")
-    print("=" * 60)
-    for sc in all_scorecards:
-        level_icon = {"safe": "✅", "borderline": "⚠️", "unsafe": "❌"}.get(
-            sc.overall_level.value, "?"
-        )
-        print(
-            f"  {level_icon}  {sc.task_name:<35}  "
-            f"{sc.overall_score:.2f}/1.00  ({sc.overall_level.value.upper()})"
-        )
-    print()
+    if len(all_scorecards) > 1:
+        print("\n" + "=" * 60)
+        print("  OVERALL SUMMARY")
+        print("=" * 60)
+        for sc in all_scorecards:
+            level_icon = {"safe": "v", "borderline": "~", "unsafe": "x"}.get(
+                sc.overall_level.value, "?"
+            )
+            print(
+                f"  [{level_icon}]  {sc.task_name:<35}  "
+                f"{sc.overall_score:.2f}/1.00  ({sc.overall_level.value.upper()})"
+            )
+        print()
 
 
 if __name__ == "__main__":
