@@ -13,7 +13,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# 2. Re-inject the beautiful Top Navigation CSS we accidentally deleted!
+# 2. Inject the Top Navigation CSS
 C = COLORS
 st.markdown(f"""
 <style>

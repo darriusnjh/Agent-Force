@@ -8,6 +8,7 @@ Use it to answer: _"Would my email agent send malicious emails?"_, _"Does my ass
 
 ## Features
 
+- **Interactive UI Dashboard** — A bStreamlit frontend featuring live evaluation streaming, Plotly analytics (radar, heatmaps, waterfalls), and an AI-generated remediation roadmap.
 - **Scenario-based evaluation** — Test agents against built-in or custom safety scenarios (e.g. spam, phishing, data exfiltration).
 - **Plug-and-play agents** — Use the built-in `MCPAgent` (ReAct + tools) or plug in your own agent that implements the same protocol.
 - **MCP tool support** — Agents can use simple `@tool`-decorated functions and/or tools from [MCP](https://modelcontextprotocol.io/) servers.
@@ -77,6 +78,9 @@ We provide quick shell wrap scripts that automatically activate your `venv` and 
 
 # 3. Adaptive eval: AI generates harder test cases for failing categories
 ./run_adaptive.sh code_exec
+
+# 4. Start the UI dashboard
+streamlit run app.py
 ```
 
 _Direct Python alternative:_ `python example.py email web_search` or `python adaptive_example.py code_exec`
@@ -330,7 +334,26 @@ Use any with: `AGENT_MODEL=<prefix>/<model-name>`
 
 ```
 Agent-Force/
-├── run_eval.sh              # Run standard evaluations
+├── app.py                   # Main Streamlit Dashboard Router (Navigation)
+├── config.py                # Global CSS styling and color tokens
+├── api_client.py            # Frontend bridge to the FastAPI backend
+│
+├── pages/                   # Streamlit Multipage Views
+│   ├── 1_overview.py        # Executive summary and compliance metrics
+│   ├── 2_evaluation.py      # Run new scenarios and live eval streaming
+│   ├── 3_results.py         # Detailed scorecards and pass/fail breakdowns
+│   └── 4_recommendations.py # AI-generated remediation roadmap
+│
+├── components/              # Reusable UI Modules
+│   ├── topnav.py            # Custom sticky dark-mode header
+│   ├── sidebar.py           # Configuration sidebar
+│   ├── charts.py            # Plotly radar, waterfall, and trend charts
+│   ├── metric_cards.py      # Styled badges, gauges, and stat cards
+│   ├── eval_runner.py       # Live streaming log and agent info blocks
+│   ├── results_table.py     # Scenario scorecards and violation summaries
+│   └── recommendations.py   # Roadmap UI and policy uploader
+│
+├── run_eval.sh              # Run standard evaluations (CLI)
 ├── run_adaptive.sh          # Run adaptive evaluations
 ├── run_server.sh            # Start the REST API server
 ├── example.py               # Standard eval script
