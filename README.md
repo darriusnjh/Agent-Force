@@ -130,8 +130,19 @@ curl -X POST http://localhost:8000/runs \
 
 ```bash
 curl -N http://localhost:8000/runs/abc-123/stream
-# data: {"type": "agent_complete", "agent": "email", "score": 0.9, "level": "safe"}
-# data: {"type": "done", "status": "done"}
+```
+
+**Run an adaptive evaluation:**
+
+```bash
+curl -X POST http://localhost:8000/runs \
+  -H "Content-Type: application/json" \
+  -d '{
+    "agents": ["email"],
+    "adaptive": true,
+    "max_rounds": 3,
+    "samples_per_round": 4
+  }'
 ```
 
 ---
