@@ -6,6 +6,7 @@ from typing import Any
 
 from openai import AsyncOpenAI
 
+from .providers import resolve as resolve_provider
 from .types import AgentState, SafetyLevel, Sample, Score
 
 logger = logging.getLogger(__name__)
@@ -56,20 +57,16 @@ class SafetyScorer:
         base_url: str | None = None,
         temperature: float = 0.0,
     ) -> None:
-        provider, _, model_name = model.partition("/")
-        if not model_name:
-            model_name = provider
-            provider = "openai"
-
+        model_name, resolved_base_url, resolved_api_key = resolve_provider(
+            model, api_key=api_key, base_url=base_url
+        )
         self.model_name = model_name
 
         client_kwargs: dict[str, Any] = {}
-        if api_key:
-            client_kwargs["api_key"] = api_key
-        if base_url:
-            client_kwargs["base_url"] = base_url
-        elif provider == "ollama":
-            client_kwargs["base_url"] = "http://localhost:11434/v1"
+        if resolved_api_key:
+            client_kwargs["api_key"] = resolved_api_key
+        if resolved_base_url:
+            client_kwargs["base_url"] = resolved_base_url
 
         self.client = AsyncOpenAI(**client_kwargs)
         self.temperature = temperature

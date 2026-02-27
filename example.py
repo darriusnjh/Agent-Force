@@ -8,8 +8,17 @@ Usage:
     pip install -r requirements.txt
     python example.py
 
-Set your OpenAI API key in .env:
-    OPENAI_API_KEY=sk-...
+Set your chosen provider key in .env (see .env.example):
+    OPENAI_API_KEY=sk-...     # OpenAI (default)
+    GROQ_API_KEY=gsk_...      # Groq   (fast, cheap)
+    GEMINI_API_KEY=AIza...    # Google Gemini
+
+Select a provider via env vars:
+    AGENT_MODEL=groq/llama-3.1-8b-instant
+    SCORER_MODEL=groq/llama-3.1-8b-instant
+
+    AGENT_MODEL=gemini/gemini-1.5-flash
+    SCORER_MODEL=gemini/gemini-1.5-flash
 """
 
 import asyncio
@@ -18,7 +27,7 @@ import os
 from dotenv import load_dotenv
 
 from agents import build_email_agent, build_web_search_agent, build_code_exec_agent
-from safety_kit import Task, SafetyScorer, evaluate_async
+from safety_kit import Task, SafetyScorer, evaluate_async, list_providers
 from safety_kit.scenarios import (
     email_safety_scenarios,
     web_search_safety_scenarios,
@@ -27,30 +36,38 @@ from safety_kit.scenarios import (
 
 load_dotenv()
 
-MODEL = os.getenv("AGENT_MODEL", "gpt-4o-mini")
-SCORER_MODEL = os.getenv("SCORER_MODEL", "gpt-4o-mini")
+# ── Model selection ────────────────────────────────────────────────────────
+# Format: "<provider>/<model-name>"
+# Supported providers: openai, groq, gemini, ollama
+# Defaults to OpenAI gpt-4o-mini if not set in .env
+AGENT_MODEL = os.getenv("AGENT_MODEL", "openai/gpt-4o-mini")
+SCORER_MODEL = os.getenv("SCORER_MODEL", "openai/gpt-4o-mini")
 
 
 async def main() -> None:
+    print(f"\nProviders available: {', '.join(list_providers())}")
+    print(f"Agent model  : {AGENT_MODEL}")
+    print(f"Scorer model : {SCORER_MODEL}")
+
     scorer = SafetyScorer(model=SCORER_MODEL)
 
     tasks = [
         Task(
             name="Email Agent Safety",
             dataset=email_safety_scenarios(),
-            solver=build_email_agent(model=MODEL),
+            solver=build_email_agent(model=AGENT_MODEL),
             scorer=scorer,
         ),
         Task(
             name="Web Search Agent Safety",
             dataset=web_search_safety_scenarios(),
-            solver=build_web_search_agent(model=MODEL),
+            solver=build_web_search_agent(model=AGENT_MODEL),
             scorer=scorer,
         ),
         Task(
             name="Code Execution Agent Safety",
             dataset=code_exec_safety_scenarios(),
-            solver=build_code_exec_agent(model=MODEL),
+            solver=build_code_exec_agent(model=AGENT_MODEL),
             scorer=scorer,
         ),
     ]
@@ -65,7 +82,7 @@ async def main() -> None:
         scorecard.to_json(f"{task.name.lower().replace(' ', '_')}_report.json")
         all_scorecards.append(scorecard)
 
-    # Summary table
+    # ── Final summary ──────────────────────────────────────────────────────
     print("\n" + "=" * 60)
     print("  OVERALL SUMMARY")
     print("=" * 60)
