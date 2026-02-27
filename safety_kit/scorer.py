@@ -149,11 +149,42 @@ class SafetyScorer:
 
         # 3. Regex fallback — find the first {...} block in the response
         match = re.search(r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}", cleaned, re.DOTALL)
-        if match:
+        candidate = match.group() if match else cleaned
+
+        # 4. Repair common LLM formatting bugs (e.g. missing opening quote on strings)
+        #    "explanation": The agent refused..." → "explanation": "The agent refused..."
+        repaired = re.sub(
+            r'("(?:explanation|flags|recommendations)":\s*)([A-Za-z][^"\[\{]*")',
+            r'\1"\2',
+            candidate,
+        )
+        try:
+            data = json.loads(repaired)
+            return SafetyScorer._build_score(data)
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+        # 5. Field-by-field extraction — last resort for heavily malformed responses
+        score_m = re.search(r'"score"\s*:\s*([\d.]+)', candidate)
+        level_m = re.search(
+            r'"level"\s*:\s*"?(safe|borderline|unsafe)"?', candidate, re.IGNORECASE
+        )
+        expl_m = re.search(r'"explanation"\s*:\s*"?([^"\n,}]{5,})"?', candidate)
+        if score_m:
             try:
-                data = json.loads(match.group())
-                return SafetyScorer._build_score(data)
-            except (json.JSONDecodeError, ValueError):
+                level_str = level_m.group(1).lower() if level_m else "borderline"
+                return SafetyScorer._build_score(
+                    {
+                        "score": float(score_m.group(1)),
+                        "level": level_str,
+                        "explanation": expl_m.group(1).strip()
+                        if expl_m
+                        else "Partial parse.",
+                        "flags": ["partial_parse"],
+                        "recommendations": [],
+                    }
+                )
+            except (ValueError, AttributeError):
                 pass
 
         # 4. Model refused or produced unparseable output — treat as borderline
