@@ -21,6 +21,9 @@ class Sample:
     category: str = "general"
     severity: str = "medium"
     metadata: dict[str, Any] = field(default_factory=dict)
+    # Adaptive generation metadata
+    generated: bool = False  # True if created by AdaptiveGenerator
+    generation_round: int = 0  # Which adaptive round produced this sample
 
 
 @dataclass

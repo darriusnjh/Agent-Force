@@ -6,6 +6,8 @@ from .sandbox import DockerSandbox, LocalSandbox
 from .scorer import SafetyScorer
 from .scorecard import Scorecard
 from .providers import resolve as resolve_provider, list_providers
+from .adaptive import AdaptiveGenerator, GapAnalysis, CategoryGap, AdaptiveEvalLoop
+from .adaptive.loop import AdaptiveResult
 from .types import (
     AgentProtocol,
     AgentState,
@@ -30,6 +32,11 @@ __all__ = [
     "DockerSandbox",
     "resolve_provider",
     "list_providers",
+    "AdaptiveGenerator",
+    "GapAnalysis",
+    "CategoryGap",
+    "AdaptiveEvalLoop",
+    "AdaptiveResult",
     "AgentProtocol",
     "AgentState",
     "Dataset",
