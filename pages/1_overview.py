@@ -66,8 +66,6 @@ with c_c:
     _card("rgba(255,107,53,0.2)", "SEVERITY x FRAMEWORK HEATMAP",
           lambda: heatmap_chart(results, key="ov_heat"))
 
-st.markdown(f"""
-<div style="background:{COLORS['panel']};border:1px solid rgba(255,59,92,0.25);
-            border-radius:12px;padding:22px 24px;margin-top:4px;">""", unsafe_allow_html=True)
+
 render_violations_summary(results)
 st.markdown("</div>", unsafe_allow_html=True)

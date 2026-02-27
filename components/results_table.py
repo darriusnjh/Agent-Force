@@ -75,33 +75,33 @@ def render_results_table(results: list[dict]):
   <span style="font-size:13px;color:{COLORS['text_dim']};line-height:1.7;">{r['reason']}</span>
 </div>""", unsafe_allow_html=True)
 
-
-def render_violations_summary(results: list[dict]):
-    """Board-level violations summary cards."""
-    violations = [r for r in results if not r["compliant"]]
+def render_violations_summary(results):
+    """Renders a self-contained box of failed scenarios."""
+    violations = [r for r in results if not r.get('compliant', True)]
+    
     if not violations:
-        st.markdown(f"""
-<div style="background:rgba(0,255,178,0.06);border:1px solid rgba(0,255,178,0.25);
-            border-radius:12px;padding:24px;text-align:center;">
-  <div style="font-size:28px;margin-bottom:8px;">✅</div>
-  <div style="font-size:15px;font-weight:700;color:{COLORS['safe']};">All Scenarios Compliant</div>
-  <div style="font-size:12px;color:{COLORS['text_dim']};margin-top:4px;">No violations detected in this evaluation run.</div>
-</div>""", unsafe_allow_html=True)
         return
 
-    section_label(f"CRITICAL VIOLATIONS — {len(violations)} ITEMS REQUIRE ATTENTION")
-    cols = st.columns(min(len(violations), 3))
-    for i, r in enumerate(violations):
-        with cols[i % 3]:
-            st.markdown(f"""
-<div style="background:rgba(255,59,92,0.06);border:1px solid rgba(255,59,92,0.25);
-            border-radius:12px;padding:18px;margin-bottom:12px;">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-    {framework_badge(r['framework'])}
-    {score_ring_html(r['score'], size=44, stroke=4)}
-  </div>
-  <div style="font-size:13px;font-weight:600;color:{COLORS['text']};margin-bottom:8px;">{r['name']}</div>
-  <div style="font-size:11px;color:{COLORS['text_dim']};line-height:1.6;">
-    {r['reason'][:110]}{'…' if len(r['reason'])>110 else ''}
-  </div>
-</div>""", unsafe_allow_html=True)
+    C = COLORS
+    
+    # We open a styled outer container div here
+    html = f"<div style='background-color: {C.get('panel', '#131722')}; border: 1px solid {C.get('border', '#1E2532')}; border-radius: 8px; padding: 20px; margin-top: 16px;'>\n"
+    
+    # Title
+    html += f"<div style='color: {C.get('danger', '#ef4444')}; font-size: 11px; font-weight: 800; letter-spacing: 0.1em; margin-bottom: 16px; text-transform: uppercase;'>CRITICAL VIOLATIONS — {len(violations)} ITEMS REQUIRE ATTENTION</div>\n"
+    
+    # List items
+    for r in violations:
+        reason = r.get('reason', 'Behavior flagged by safety judge.')
+        trunc_reason = reason[:110] + ('…' if len(reason) > 110 else '')
+        id_str = r.get('id', '')
+        
+        html += f"<div style='margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid {C.get('border', '#1E2532')};'>\n"
+        html += f"<div style='color: {C.get('text', '#E2E8F0')}; font-size: 13px; font-weight: 700; margin-bottom: 4px;'>{id_str} {r['name']}</div>\n"
+        html += f"<div style='color: {C.get('text_dim', '#718096')}; font-size: 12px; line-height: 1.5;'>{trunc_reason}</div>\n"
+        html += f"</div>\n"
+        
+    # Close the outer container div
+    html += "</div>\n"
+    
+    st.markdown(html, unsafe_allow_html=True)
