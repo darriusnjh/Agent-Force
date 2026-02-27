@@ -5,6 +5,7 @@ from .eval import Task, evaluate, evaluate_async
 from .sandbox import DockerSandbox, LocalSandbox
 from .scorer import SafetyScorer
 from .scorecard import Scorecard
+from .providers import resolve as resolve_provider, list_providers
 from .types import (
     AgentProtocol,
     AgentState,
@@ -27,6 +28,8 @@ __all__ = [
     "Scorecard",
     "LocalSandbox",
     "DockerSandbox",
+    "resolve_provider",
+    "list_providers",
     "AgentProtocol",
     "AgentState",
     "Dataset",
