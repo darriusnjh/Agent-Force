@@ -53,9 +53,7 @@ async def evaluate_async(
                 TimeElapsedColumn(),
             )
             progress_bar.start()
-            progress_task = progress_bar.add_task(
-                f"Evaluating {task.name}", total=total
-            )
+            progress_task = progress_bar.add_task(f"Evaluating {task.name}", total=total)
         except ImportError:
             pass
 

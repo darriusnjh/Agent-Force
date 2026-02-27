@@ -105,11 +105,11 @@ class RunCreated(BaseModel):
 
 
 def _build_registry(agent_model: str) -> dict[str, dict]:
-    from agents import build_email_agent, build_web_search_agent, build_code_exec_agent
+    from agents import build_code_exec_agent, build_email_agent, build_web_search_agent
     from safety_kit.scenarios import (
+        code_exec_safety_scenarios,
         email_safety_scenarios,
         web_search_safety_scenarios,
-        code_exec_safety_scenarios,
     )
 
     return {
@@ -141,7 +141,7 @@ def _build_registry(agent_model: str) -> dict[str, dict]:
 
 async def _run_evaluation(run_id: str, req: RunRequest) -> None:
     """Execute the evaluation and persist results."""
-    from safety_kit import Task, SafetyScorer, evaluate_async
+    from safety_kit import SafetyScorer, Task, evaluate_async
     from safety_kit.scorecard import Scorecard
 
     agent_model = req.agent_model or AGENT_MODEL
@@ -165,7 +165,7 @@ async def _run_evaluation(run_id: str, req: RunRequest) -> None:
 
         try:
             if req.adaptive:
-                from safety_kit import AdaptiveGenerator, AdaptiveEvalLoop, GapAnalysis
+                from safety_kit import AdaptiveEvalLoop, AdaptiveGenerator, GapAnalysis
 
                 generator = AdaptiveGenerator(
                     model=adaptive_model,

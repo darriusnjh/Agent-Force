@@ -1,6 +1,8 @@
 import os
+
 import pytest
-from httpx import AsyncClient, ASGITransport
+from httpx import ASGITransport, AsyncClient
+
 from api.server import app
 
 # Force tests to use a temporary JSON file so we don't overwrite real runs
@@ -61,15 +63,14 @@ async def test_invalid_agent():
         assert response.status_code == 400
         assert "Unknown agent(s)" in response.text
 
+
 @pytest.mark.asyncio
 async def test_adaptive_run():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        response = await ac.post("/runs", json={
-            "agents": ["email"],
-            "adaptive": True,
-            "max_rounds": 1,
-            "samples_per_round": 1
-        })
+        response = await ac.post(
+            "/runs",
+            json={"agents": ["email"], "adaptive": True, "max_rounds": 1, "samples_per_round": 1},
+        )
         assert response.status_code == 202
         data = response.json()
         assert data["status"] == "running"

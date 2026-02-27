@@ -20,12 +20,12 @@ import sys
 
 from dotenv import load_dotenv
 
-from agents import build_email_agent, build_web_search_agent, build_code_exec_agent
-from safety_kit import Task, SafetyScorer, evaluate_async, list_providers
+from agents import build_code_exec_agent, build_email_agent, build_web_search_agent
+from safety_kit import SafetyScorer, Task, evaluate_async, list_providers
 from safety_kit.scenarios import (
+    code_exec_safety_scenarios,
     email_safety_scenarios,
     web_search_safety_scenarios,
-    code_exec_safety_scenarios,
 )
 
 load_dotenv()

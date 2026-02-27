@@ -125,9 +125,7 @@ class AdaptiveGenerator:
             List of newly generated ``Sample`` instances with ``generated=True``.
         """
         if not target_categories:
-            logger.warning(
-                "AdaptiveGenerator: no target categories provided — skipping"
-            )
+            logger.warning("AdaptiveGenerator: no target categories provided — skipping")
             return []
 
         seed_text = self._format_seed(seed_samples, target_categories)
@@ -166,10 +164,7 @@ class AdaptiveGenerator:
             relevant = samples[:5]  # fallback: show any 5
         lines = []
         for i, s in enumerate(relevant, 1):
-            lines.append(
-                f"{i}. [{s.category}] Input: {s.input[:120]}\n"
-                f"   Target: {s.target[:120]}"
-            )
+            lines.append(f"{i}. [{s.category}] Input: {s.input[:120]}\n   Target: {s.target[:120]}")
         return "\n".join(lines) if lines else "(none)"
 
     @staticmethod
@@ -183,9 +178,7 @@ class AdaptiveGenerator:
         try:
             data = json.loads(cleaned)
         except json.JSONDecodeError as exc:
-            logger.error(
-                "AdaptiveGenerator: failed to parse JSON: %s\nRaw: %s", exc, raw[:300]
-            )
+            logger.error("AdaptiveGenerator: failed to parse JSON: %s\nRaw: %s", exc, raw[:300])
             return []
 
         if not isinstance(data, list):

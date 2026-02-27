@@ -155,9 +155,7 @@ class MCPAgent:
 
     # ---- tool preparation --------------------------------------------------
 
-    async def _prepare_tools(
-        self, stack: AsyncExitStack
-    ) -> tuple[list[dict], dict[str, Callable]]:
+    async def _prepare_tools(self, stack: AsyncExitStack) -> tuple[list[dict], dict[str, Callable]]:
         """Build unified tool schemas + dispatch map from all sources."""
         schemas: list[dict] = []
         dispatch: dict[str, Callable] = {}
@@ -217,9 +215,7 @@ class MCPAgent:
                 }
                 schemas.append(schema)
 
-                async def _mcp_call(
-                    _args: dict, _sess=session, _name=mcp_tool.name
-                ) -> str:
+                async def _mcp_call(_args: dict, _sess=session, _name=mcp_tool.name) -> str:
                     result = await _sess.call_tool(_name, arguments=_args)
                     texts = []
                     for item in result.content:

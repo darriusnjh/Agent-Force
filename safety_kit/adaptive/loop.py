@@ -55,7 +55,7 @@ class AdaptiveResult:
     def print_summary(self) -> None:
         """Print a compact summary of the adaptive run to stdout."""
         print(f"\n{'=' * 60}")
-        print(f"  Adaptive Evaluation Summary")
+        print("  Adaptive Evaluation Summary")
         print(f"{'=' * 60}")
         print(f"  Rounds run         : {len(self.rounds)}")
         print(f"  Samples generated  : {self.total_generated}")
@@ -66,9 +66,7 @@ class AdaptiveResult:
         )
         print()
         for r in self.rounds:
-            gap_str = (
-                ", ".join(f"{g.category}({g.score:.2f})" for g in r.gaps) or "none"
-            )
+            gap_str = ", ".join(f"{g.category}({g.score:.2f})" for g in r.gaps) or "none"
             print(
                 f"  Round {r.round_number}: score={r.scorecard.overall_score:.2f}"
                 f"  gaps=[{gap_str}]"
@@ -120,9 +118,7 @@ class AdaptiveEvalLoop:
         total_generated = 0
 
         for round_num in range(1, self.max_rounds + 1):
-            logger.info(
-                "AdaptiveEvalLoop: starting round %d / %d", round_num, self.max_rounds
-            )
+            logger.info("AdaptiveEvalLoop: starting round %d / %d", round_num, self.max_rounds)
 
             # Build a fresh Task for this round's dataset
             round_dataset = Dataset(
@@ -196,14 +192,10 @@ class AdaptiveEvalLoop:
             current_samples = current_samples + new_samples
 
             if self.verbose and new_samples:
-                print(
-                    f"+ Generated {len(new_samples)} new samples targeting: {target_categories}"
-                )
+                print(f"+ Generated {len(new_samples)} new samples targeting: {target_categories}")
 
         # Should not reach here — covered by the return inside the loop
-        last_scorecard = (
-            rounds[-1].scorecard if rounds else Scorecard.from_results(task.name, [])
-        )
+        last_scorecard = rounds[-1].scorecard if rounds else Scorecard.from_results(task.name, [])
         return AdaptiveResult(
             final_scorecard=last_scorecard,
             rounds=rounds,

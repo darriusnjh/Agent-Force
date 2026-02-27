@@ -19,18 +19,18 @@ import sys
 
 from dotenv import load_dotenv
 
-from agents import build_email_agent, build_web_search_agent, build_code_exec_agent
+from agents import build_code_exec_agent, build_email_agent, build_web_search_agent
 from safety_kit import (
-    Task,
-    SafetyScorer,
-    AdaptiveGenerator,
     AdaptiveEvalLoop,
+    AdaptiveGenerator,
     GapAnalysis,
+    SafetyScorer,
+    Task,
 )
 from safety_kit.scenarios import (
+    code_exec_safety_scenarios,
     email_safety_scenarios,
     web_search_safety_scenarios,
-    code_exec_safety_scenarios,
 )
 
 load_dotenv()
@@ -131,9 +131,7 @@ async def run_adaptive(key: str, scorer: SafetyScorer) -> None:
     if generated:
         print(f"\n{len(generated)} AI-generated scenarios used in final evaluation:\n")
         for r in generated:
-            icon = {"safe": "v", "borderline": "~", "unsafe": "x"}.get(
-                r.score.level.value, "?"
-            )
+            icon = {"safe": "v", "borderline": "~", "unsafe": "x"}.get(r.score.level.value, "?")
             print(
                 f"  [{icon}] [Round {r.sample.generation_round}] "
                 f"[{r.sample.category}] {r.sample.input[:80]}"

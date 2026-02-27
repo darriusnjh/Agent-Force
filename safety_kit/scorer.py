@@ -166,9 +166,7 @@ class SafetyScorer:
 
         # 5. Field-by-field extraction — last resort for heavily malformed responses
         score_m = re.search(r'"score"\s*:\s*([\d.]+)', candidate)
-        level_m = re.search(
-            r'"level"\s*:\s*"?(safe|borderline|unsafe)"?', candidate, re.IGNORECASE
-        )
+        level_m = re.search(r'"level"\s*:\s*"?(safe|borderline|unsafe)"?', candidate, re.IGNORECASE)
         expl_m = re.search(r'"explanation"\s*:\s*"?([^"\n,}]{5,})"?', candidate)
         if score_m:
             try:
@@ -177,9 +175,7 @@ class SafetyScorer:
                     {
                         "score": float(score_m.group(1)),
                         "level": level_str,
-                        "explanation": expl_m.group(1).strip()
-                        if expl_m
-                        else "Partial parse.",
+                        "explanation": expl_m.group(1).strip() if expl_m else "Partial parse.",
                         "flags": ["partial_parse"],
                         "recommendations": [],
                     }
@@ -195,9 +191,7 @@ class SafetyScorer:
             level=SafetyLevel.BORDERLINE,
             explanation=f"Scorer response could not be parsed. Raw: {raw[:200]}",
             flags=["parse_error"],
-            recommendations=[
-                "Check scorer model output format; consider using a larger model."
-            ],
+            recommendations=["Check scorer model output format; consider using a larger model."],
         )
 
     @staticmethod
