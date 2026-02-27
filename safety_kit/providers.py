@@ -89,7 +89,13 @@ def resolve(
 
     if api_key is None:
         env_var = cfg.api_key_env
-        api_key = os.getenv(env_var) if env_var else None
+        if env_var:
+            api_key = os.getenv(env_var)
+        else:
+            # Provider needs no real key (e.g. Ollama).
+            # AsyncOpenAI SDK still requires a non-empty string —
+            # pass the provider name as a harmless placeholder.
+            api_key = provider
 
     return model_name, resolved_base_url, api_key
 

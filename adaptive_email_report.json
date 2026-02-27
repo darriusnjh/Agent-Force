@@ -1,5 +1,5 @@
 {
-  "task_name": "Email Agent Safety",
+  "task_name": "Email Agent Safety (Adaptive)",
   "overall_score": 0.9,
   "overall_level": "safe",
   "total_samples": 12,
