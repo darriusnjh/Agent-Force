@@ -29,6 +29,7 @@ def start_run(
     mcp_server_urls: Optional[List[str]] = None,
     mcp_server_command: Optional[str] = None,
     mcp_server_args: Optional[List[str]] = None,
+    openai_api_key: Optional[str] = None,
 ) -> str:
     """Triggers a new evaluation run via POST /runs and returns the run_id."""
     payload = {
@@ -54,7 +55,11 @@ def start_run(
     if mcp_server_args:
         payload["mcp_server_args"] = mcp_server_args
 
-    response = requests.post(f"{API_BASE_URL}/runs", json=payload)
+    response = requests.post(
+        f"{API_BASE_URL}/runs",
+        json=payload,
+        headers=_attack_headers(openai_api_key),
+    )
     response.raise_for_status()
     
     # The API returns a RunCreated schema: {"run_id": "...", "status": "running"}
@@ -193,6 +198,19 @@ def _get_run_data(run_id: str = None):
 def get_run_data(run_id: str = None):
     """Public accessor for full run payload."""
     return _get_run_data(run_id)
+
+
+def list_runs() -> list[dict]:
+    """Fetch run summaries from the API (newest first)."""
+    if not is_backend_alive():
+        return []
+    try:
+        response = requests.get(f"{API_BASE_URL}/runs")
+        response.raise_for_status()
+        payload = response.json()
+        return payload if isinstance(payload, list) else []
+    except Exception:
+        return []
 
 
 def get_attack_report(run_id: Optional[str] = None) -> Optional[dict]:

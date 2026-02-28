@@ -274,7 +274,7 @@ def _build_registry() -> dict[str, dict]:
     }
 
 
-def _build_scorer(req: RunRequest, scorer_model: str):
+def _build_scorer(req: RunRequest, scorer_model: str, scorer_api_key: Optional[str] = None):
     from sandbox_env.detectors import DeterministicSafetyScorer
     from safety_kit import SafetyScorer
 
@@ -282,7 +282,7 @@ def _build_scorer(req: RunRequest, scorer_model: str):
         return DeterministicSafetyScorer(), True
 
     try:
-        return SafetyScorer(model=scorer_model), False
+        return SafetyScorer(model=scorer_model, api_key=scorer_api_key), False
     except Exception:
         # Keep the demo pipeline running even if scorer provider config is unavailable.
         return DeterministicSafetyScorer(), True
@@ -297,6 +297,7 @@ def _build_world_solver(
     mcp_server_command: Optional[str] = None,
     mcp_server_args: Optional[list[str]] = None,
     on_tool_call: Any | None = None,
+    api_key: Optional[str] = None,
 ):
     from sandbox_env.runtime import (
         build_world_code_exec_agent,
@@ -313,6 +314,7 @@ def _build_world_solver(
             mcp_server_command=mcp_server_command,
             mcp_server_args=mcp_server_args,
             on_tool_call=on_tool_call,
+            api_key=api_key,
         )
     if key == "web_search":
         return build_world_web_search_agent(
@@ -323,6 +325,7 @@ def _build_world_solver(
             mcp_server_command=mcp_server_command,
             mcp_server_args=mcp_server_args,
             on_tool_call=on_tool_call,
+            api_key=api_key,
         )
     if key == "code_exec":
         return build_world_code_exec_agent(
@@ -333,6 +336,7 @@ def _build_world_solver(
             mcp_server_command=mcp_server_command,
             mcp_server_args=mcp_server_args,
             on_tool_call=on_tool_call,
+            api_key=api_key,
         )
     return None
 
@@ -348,7 +352,11 @@ def _normalise_mcp_command_args(args: Optional[list[str]]) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-async def _run_evaluation(run_id: str, req: RunRequest) -> None:
+async def _run_evaluation(
+    run_id: str,
+    req: RunRequest,
+    openai_api_key: Optional[str] = None,
+) -> None:
     """Execute the evaluation and persist results + sandbox artifacts."""
     from sandbox_env.detectors import DeterministicSafetyScorer
     from sandbox_env.runtime import (
@@ -366,7 +374,11 @@ async def _run_evaluation(run_id: str, req: RunRequest) -> None:
         adaptive_model = req.adaptive_model or ADAPTIVE_MODEL
 
         registry = _build_registry()
-        scorer, scorer_fallback_used = _build_scorer(req, scorer_model)
+        scorer, scorer_fallback_used = _build_scorer(
+            req,
+            scorer_model,
+            scorer_api_key=openai_api_key,
+        )
 
         artifact_writer = ArtifactWriter(run_id=run_id, config=req.model_dump())
 
@@ -478,6 +490,7 @@ async def _run_evaluation(run_id: str, req: RunRequest) -> None:
                     demo_mode=req.demo_mode,
                     trace_level=req.trace_level,
                     scorer_model=scorer_model,
+                    scorer_api_key=openai_api_key,
                     agent_name=key,
                     mcp_manifests=resolved_mcp_manifests,
                     mcp_server_urls=req.mcp_server_urls,
@@ -493,6 +506,7 @@ async def _run_evaluation(run_id: str, req: RunRequest) -> None:
                     mcp_server_command=req.mcp_server_command,
                     mcp_server_args=_normalise_mcp_command_args(req.mcp_server_args),
                     on_tool_call=on_tool_call,
+                    api_key=openai_api_key,
                 )
                 if world_solver is not None:
                     solver = world_solver
@@ -507,6 +521,7 @@ async def _run_evaluation(run_id: str, req: RunRequest) -> None:
                 builder_kwargs: dict[str, Any] = {
                     "model": agent_model,
                     "on_tool_call": on_tool_call,
+                    "api_key": openai_api_key,
                 }
                 if req.mcp_server_urls:
                     builder_kwargs["mcp_server_urls"] = req.mcp_server_urls
@@ -545,6 +560,7 @@ async def _run_evaluation(run_id: str, req: RunRequest) -> None:
                             model=adaptive_model,
                             agent_type=cfg["agent_type"],
                             difficulty="hard",
+                            api_key=openai_api_key,
                         )
                         loop = AdaptiveEvalLoop(
                             generator=generator,
@@ -855,7 +871,10 @@ async def health() -> dict:
 
 
 @app.post("/runs", response_model=RunCreated, status_code=202)
-async def create_run(req: RunRequest) -> RunCreated:
+async def create_run(
+    req: RunRequest,
+    openai_api_key: Optional[str] = Header(default=None, alias="X-OpenAI-API-Key"),
+) -> RunCreated:
     """Start a new safety evaluation run. Returns immediately with a run_id."""
 
     valid_agents = {"email", "web_search", "code_exec", "jira"}
@@ -869,7 +888,7 @@ async def create_run(req: RunRequest) -> RunCreated:
     await store.create_run(run_id, req.model_dump())
 
     # Fire-and-forget background task
-    asyncio.create_task(_run_evaluation(run_id, req))
+    asyncio.create_task(_run_evaluation(run_id, req, openai_api_key=(openai_api_key or "").strip() or None))
 
     return RunCreated(run_id=run_id)
 

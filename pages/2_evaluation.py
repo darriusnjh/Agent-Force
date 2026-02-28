@@ -264,6 +264,7 @@ render_sidebar(backend_alive=alive)
 render_page_header("Run Evaluation", "Evaluation", (COLORS["accent2"], COLORS["accent3"]))
 
 scenarios = get_scenarios()
+env_openai_key = os.getenv("OPENAI_API_KEY", "").strip()
 tab_standard, tab_attack = st.tabs(["Standard Evaluation", "Attack Kit"])
 
 with tab_standard:
@@ -353,6 +354,16 @@ with tab_standard:
             help="Stop the attacker-target interaction as soon as a violation is detected.",
         )
 
+    std_openai_api_key = st.text_input(
+        "OpenAI API Key (optional)",
+        key="std_openai_api_key",
+        type="password",
+        help=(
+            "Optional override for this session. Leave empty to use OPENAI_API_KEY from environment."
+        ),
+    )
+    effective_std_openai_key = (std_openai_api_key or "").strip() or env_openai_key
+
     st.markdown("</div>", unsafe_allow_html=True)
     std_config = {
         "agent": std_agent,
@@ -365,6 +376,7 @@ with tab_standard:
         "adversarial_adaptive": std_adversarial_adaptive,
         "adversarial_max_turns": std_adversarial_max_turns,
         "adversarial_stop_on_violation": std_adversarial_stop_on_violation,
+        "openai_api_key": effective_std_openai_key,
     }
 
     col_main, col_info = st.columns([2, 1])
@@ -390,15 +402,9 @@ with tab_standard:
             unsafe_allow_html=True,
         )
 
-        b1, b2, b3 = st.columns([2, 1, 1])
+        b1, b3 = st.columns([2, 1])
         with b1:
             run_clicked = st.button("RUN EVALUATION", use_container_width=True, key="std_run")
-        with b2:
-            adaptive_run = st.button(
-                "ADAPTIVE RUN",
-                use_container_width=True,
-                key="std_adaptive_run_button",
-            )
         with b3:
             st.button("ABORT", use_container_width=True, key="std_abort")
 
@@ -449,12 +455,12 @@ with tab_standard:
             line.strip() for line in (std_mcp_links_raw or "").splitlines() if line.strip()
         ]
 
-        if not run_clicked and not adaptive_run:
+        if not run_clicked:
             _render_panel(f"SCENARIO QUEUE — {len(scenarios)} TESTS READY", "rgba(0,212,255,0.18)")
             render_scenario_queue(scenarios, running=False)
             st.markdown("</div>", unsafe_allow_html=True)
 
-        if run_clicked or adaptive_run:
+        if run_clicked:
             _render_panel("EVALUATION IN PROGRESS", "rgba(0,212,255,0.25)")
 
             if std_mcp_server_args is None:
@@ -463,7 +469,7 @@ with tab_standard:
                 with st.status("Initializing Agent-Force Engine...", expanded=True) as status_box:
                     run_id = start_run(
                         agents=[std_config.get("agent", "email")],
-                        adaptive=std_config.get("adaptive", False) or adaptive_run,
+                        adaptive=std_config.get("adaptive", False),
                         agent_model=std_config.get("agent_model"),
                         scorer_model=std_config.get("scorer_model"),
                         max_rounds=std_config.get("max_rounds", 3),
@@ -477,6 +483,7 @@ with tab_standard:
                         mcp_server_urls=std_mcp_server_urls,
                         mcp_server_command=(std_mcp_server_command or "").strip() or None,
                         mcp_server_args=std_mcp_server_args or [],
+                        openai_api_key=std_config.get("openai_api_key"),
                     )
 
                     if run_id:
@@ -713,7 +720,6 @@ with tab_attack:
         unsafe_allow_html=True,
     )
 
-    env_openai_key = os.getenv("OPENAI_API_KEY", "").strip()
     if "attack_openai_api_key" not in st.session_state:
         st.session_state["attack_openai_api_key"] = ""
 
@@ -726,7 +732,11 @@ with tab_attack:
             "environment."
         ),
     )
-    effective_openai_key = (frontend_openai_key or "").strip() or env_openai_key
+    effective_openai_key = (
+        (frontend_openai_key or "").strip()
+        or (st.session_state.get("std_openai_api_key", "") or "").strip()
+        or env_openai_key
+    )
     key_ready = bool(effective_openai_key)
     if key_ready and (frontend_openai_key or "").strip():
         st.info("Using OpenAI API key from frontend input for attack-kit actions.")
