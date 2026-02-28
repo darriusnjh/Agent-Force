@@ -153,6 +153,24 @@ def _get_run_data(run_id: str = None):
     except Exception:
         return None
 
+
+def get_run_data(run_id: str = None):
+    """Public accessor for full run payload."""
+    return _get_run_data(run_id)
+
+
+def get_attack_report(run_id: str = None) -> dict | None:
+    """Return attack report payload when the run is an attack campaign."""
+    run_data = _get_run_data(run_id)
+    if not run_data:
+        return None
+
+    for result in run_data.get("results", []):
+        if result.get("agent") == "attack_agent" and isinstance(result.get("report"), dict):
+            return result["report"]
+
+    return None
+
 def get_results(run_id: str = None) -> list[dict]:
     run_data = _get_run_data(run_id)
     if not run_data: return MOCK_RESULTS 
