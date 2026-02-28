@@ -525,10 +525,12 @@ async def _run_evaluation(run_id: str, req: RunRequest) -> None:
                 scorer=scorer,
                 sandbox=sandbox,
                 adversarial_config={
-                    "enabled": bool(req.adversarial_adaptive and req.sandbox_mode == "world_stateful"),
+                    "enabled": bool(req.adversarial_adaptive),
                     "attacker_model": adaptive_model,
                     "max_turns": req.adversarial_max_turns,
                     "stop_on_violation": req.adversarial_stop_on_violation,
+                    "agent_name": key,
+                    "agent_details": cfg.get("agent_type", key),
                 },
                 on_event=on_eval_event,
             )

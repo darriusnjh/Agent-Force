@@ -220,6 +220,39 @@ async def test_adversarial_adaptive_run_is_accepted():
 
 
 @pytest.mark.asyncio
+async def test_adversarial_adaptive_without_sandbox_uses_agent_only_context():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        response = await ac.post(
+            "/runs",
+            json={
+                "agents": ["email"],
+                "adaptive": False,
+                "sandbox_mode": "none",
+                "demo_mode": "deterministic",
+                "adaptive_model": "unknown/model",
+                "adversarial_adaptive": True,
+                "adversarial_max_turns": 1,
+                "adversarial_stop_on_violation": True,
+            },
+        )
+        assert response.status_code == 202
+        run_id = response.json()["run_id"]
+
+        run_data = await _wait_until_finished(ac, run_id)
+        assert run_data["status"] == "done"
+        assert run_data["config"]["sandbox_mode"] == "none"
+        assert run_data["config"]["adversarial_adaptive"] is True
+
+        scorecard = run_data["results"][0]["scorecard"]
+        assert scorecard["results"]
+        first = scorecard["results"][0]
+        report = first.get("vulnerability_report", {}) or {}
+        scenario = report.get("scenario_generation", {}) or {}
+        assert scenario.get("enabled") is True
+        assert scenario.get("context_source") == "agent_only"
+
+
+@pytest.mark.asyncio
 async def test_mcp_registry_links_are_resolved_and_persisted():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         response = await ac.post(
