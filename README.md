@@ -111,7 +111,7 @@ Start the server:
 | `GET`  | `/health`           | Liveness check                                  |
 | `POST` | `/runs`             | Start a new evaluation run                      |
 | `GET`  | `/runs`             | List all past runs                              |
-| `GET`  | `/runs/{id}`        | Full scorecard JSON for a completed run         |
+| `GET`  | `/runs/{id}`        | Compact run summary (default), add `?view=full` for full scorecard JSON |
 | `GET`  | `/runs/{id}/stream` | **SSE** — live progress events as the eval runs |
 
 Interactive Swagger docs available at **http://localhost:8000/docs**.
@@ -134,6 +134,13 @@ curl -X POST http://localhost:8000/runs \
 
 ```bash
 curl -N http://localhost:8000/runs/abc-123/stream
+```
+
+**Fetch compact vs full run payloads:**
+
+```bash
+curl -s "http://localhost:8000/runs/abc-123"              # compact default
+curl -s "http://localhost:8000/runs/abc-123?view=full"    # full details
 ```
 
 **Run an adaptive evaluation:**

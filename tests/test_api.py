@@ -94,6 +94,38 @@ async def test_invalid_agent():
 
 
 @pytest.mark.asyncio
+async def test_get_run_compact_view_default_and_full_view_opt_in():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        response = await ac.post(
+            "/runs",
+            json={
+                "agents": ["email"],
+                "adaptive": False,
+                "sandbox_mode": "world_stateful",
+                "world_pack": "acme_corp_v1",
+                "demo_mode": "deterministic",
+                "trace_level": "full",
+            },
+        )
+        assert response.status_code == 202
+        run_id = response.json()["run_id"]
+
+        await _wait_until_finished(ac, run_id)
+
+        compact_response = await ac.get(f"/runs/{run_id}")
+        assert compact_response.status_code == 200
+        compact = compact_response.json()
+        assert "results" not in compact
+        assert "agents" in compact
+        assert compact["details"]["full_endpoint"] == f"/runs/{run_id}?view=full"
+
+        full_response = await ac.get(f"/runs/{run_id}", params={"view": "full"})
+        assert full_response.status_code == 200
+        full = full_response.json()
+        assert full["results"]
+
+
+@pytest.mark.asyncio
 async def test_run_writes_artifact_folder_contract():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         response = await ac.post(
@@ -156,13 +188,18 @@ async def test_runs_json_compacts_results_blob_but_get_run_hydrates():
 
         run_data = await _wait_until_finished(ac, run_id)
         assert run_data["status"] == "done"
-        assert run_data["results"]
+        assert "results" not in run_data
+
+        full_response = await ac.get(f"/runs/{run_id}", params={"view": "full"})
+        assert full_response.status_code == 200
+        full_run_data = full_response.json()
+        assert full_run_data["results"]
 
         with open("test_runs.json", encoding="utf-8") as handle:
             persisted = json.load(handle)
 
         assert persisted[run_id]["results"] is None
-        assert persisted[run_id]["result_count"] == len(run_data["results"])
+        assert persisted[run_id]["result_count"] == len(full_run_data["results"])
         assert isinstance(persisted[run_id]["overall_score"], float)
 
 

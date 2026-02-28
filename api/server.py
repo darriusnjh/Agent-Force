@@ -3,7 +3,7 @@
 Endpoints:
     POST /runs                  -> start a new evaluation run (returns run_id)
     GET  /runs                  -> list all past runs
-    GET  /runs/{run_id}         -> full scorecard JSON for a run
+    GET  /runs/{run_id}         -> compact run summary by default; full scorecard with ?view=full
     GET  /runs/{run_id}/stream  -> SSE stream of live progress events
     GET  /health                -> liveness check
 """
@@ -396,6 +396,79 @@ def _scorecard_to_dict(sc) -> dict[str, Any]:
     }
 
 
+def _agent_summary_from_results(results: list[dict] | None) -> list[dict]:
+    if not isinstance(results, list):
+        return []
+
+    summaries: list[dict] = []
+    for item in results:
+        if not isinstance(item, dict):
+            continue
+
+        scorecard = item.get("scorecard")
+        if not isinstance(scorecard, dict):
+            continue
+
+        all_flags = scorecard.get("all_flags")
+        all_recommendations = scorecard.get("all_recommendations")
+        summaries.append(
+            {
+                "agent": item.get("agent"),
+                "overall_score": scorecard.get("overall_score"),
+                "overall_level": scorecard.get("overall_level"),
+                "total_samples": scorecard.get("total_samples"),
+                "category_scores": scorecard.get("category_scores", {}),
+                "level_counts": scorecard.get("level_counts", {}),
+                "flags_count": len(all_flags) if isinstance(all_flags, list) else 0,
+                "recommendation_count": len(all_recommendations) if isinstance(all_recommendations, list) else 0,
+            }
+        )
+
+    return summaries
+
+
+def _compact_run_payload(run_id: str, run: dict[str, Any], results: list[dict] | None) -> dict[str, Any]:
+    config = run.get("config", {}) if isinstance(run.get("config"), dict) else {}
+    mcp_manifests = run.get("mcp_manifests", [])
+
+    return {
+        "run_id": run.get("run_id", run_id),
+        "status": run.get("status"),
+        "created_at": run.get("created_at"),
+        "finished_at": run.get("finished_at"),
+        "config": config,
+        "fallback_used": run.get("fallback_used", False),
+        "world_pack": run.get("world_pack"),
+        "sandbox_mode": run.get("sandbox_mode"),
+        "mcp_manifests": mcp_manifests if isinstance(mcp_manifests, list) else [],
+        "artifact_dir": run.get("artifact_dir"),
+        "config_path": run.get("config_path"),
+        "scorecard_path": run.get("scorecard_path"),
+        "trace_path": run.get("trace_path"),
+        "violations_path": run.get("violations_path"),
+        "summary_path": run.get("summary_path"),
+        "overall_score": run.get("overall_score"),
+        "result_count": run.get("result_count"),
+        "summary": {
+            "overall_score": run.get("overall_score"),
+            "result_count": run.get("result_count"),
+            "fallback_used": run.get("fallback_used", False),
+            "world_pack": run.get("world_pack"),
+            "sandbox_mode": run.get("sandbox_mode"),
+            "mcp_manifest_count": len(mcp_manifests) if isinstance(mcp_manifests, list) else 0,
+        },
+        "agents": _agent_summary_from_results(results),
+        "details": {
+            "full_endpoint": f"/runs/{run_id}?view=full",
+            "full_payload_includes": [
+                "results",
+                "mcp_manifests",
+                "all run metadata",
+            ],
+        },
+    }
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -431,19 +504,25 @@ async def list_runs() -> list[dict]:
 
 
 @app.get("/runs/{run_id}")
-async def get_run(run_id: str) -> dict:
-    """Return the full scorecard data for a completed run."""
-    run = await store.get_run(run_id)
+async def get_run(run_id: str, view: Literal["compact", "full"] = "compact") -> dict:
+    """Return run data. Use view=compact (default) or view=full."""
+    run = await store.get_run(run_id, include_results=(view == "full"))
     if run is None:
         raise HTTPException(404, f"Run {run_id!r} not found.")
-    return run
+    if view == "full":
+        return run
+
+    hydrated = await store.get_run(run_id, include_results=True)
+    if hydrated is None:
+        raise HTTPException(404, f"Run {run_id!r} not found.")
+    return _compact_run_payload(run_id, run, hydrated.get("results"))
 
 
 @app.get("/runs/{run_id}/stream")
 async def stream_run(run_id: str) -> StreamingResponse:
     """SSE stream of live progress events for a running evaluation."""
 
-    run = await store.get_run(run_id)
+    run = await store.get_run(run_id, include_results=False)
     if run is None:
         raise HTTPException(404, f"Run {run_id!r} not found.")
 
@@ -455,7 +534,7 @@ async def stream_run(run_id: str) -> StreamingResponse:
                 yield f"data: {json.dumps(evt)}\n\n"
                 last_idx += 1
 
-            run_state = await store.get_run(run_id)
+            run_state = await store.get_run(run_id, include_results=False)
             if run_state and run_state.get("status") in ("done", "error"):
                 yield f"data: {json.dumps({'type': 'done', 'status': run_state['status']})}\n\n"
                 break

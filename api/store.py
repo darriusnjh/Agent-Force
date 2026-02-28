@@ -68,10 +68,12 @@ class RunStore:
                 runs[run_id].update(metadata)
             self._write(runs)
 
-    async def get_run(self, run_id: str) -> dict | None:
+    async def get_run(self, run_id: str, *, include_results: bool = True) -> dict | None:
         run = self._read().get(run_id)
         if run is None:
             return None
+        if not include_results:
+            return run
         return self._hydrate_results(run)
 
     async def list_runs(self) -> list[dict]:

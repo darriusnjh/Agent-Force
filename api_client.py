@@ -42,13 +42,13 @@ def _get_run_data(run_id: str = None):
         return None
     try:
         if run_id:
-            return requests.get(f"{API_BASE_URL}/runs/{run_id}").json()
+            return requests.get(f"{API_BASE_URL}/runs/{run_id}", params={"view": "full"}).json()
         else:
             runs = requests.get(f"{API_BASE_URL}/runs").json()
             if not runs:
                 return None
             latest_id = runs[-1].get("run_id", runs[-1].get("id"))
-            return requests.get(f"{API_BASE_URL}/runs/{latest_id}").json()
+            return requests.get(f"{API_BASE_URL}/runs/{latest_id}", params={"view": "full"}).json()
     except Exception:
         return None
 
