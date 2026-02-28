@@ -20,14 +20,14 @@ class RunStore:
 
     def __init__(self, runs_file: str = RUNS_FILE) -> None:
         self.runs_file = runs_file
-        self._events: dict[str, list[dict]] = {}  # run_id → [event, ...]
+        self._events: dict[str, list[dict]] = {}  # run_id -> [event, ...]
 
     async def init(self) -> None:
         """Create the runs file if it doesn't exist."""
         if not os.path.exists(self.runs_file):
             self._write({})
 
-    # ── Runs ──────────────────────────────────────────────────────────────
+    # -- Runs ---------------------------------------------------------------
 
     async def create_run(self, run_id: str, config: dict) -> None:
         runs = self._read()
@@ -42,12 +42,24 @@ class RunStore:
         self._write(runs)
         self._events[run_id] = []
 
-    async def finish_run(self, run_id: str, results: list[dict]) -> None:
+    async def finish_run(self, run_id: str, results: list[dict], metadata: dict | None = None) -> None:
         runs = self._read()
         if run_id in runs:
             runs[run_id]["status"] = "done"
             runs[run_id]["results"] = results
             runs[run_id]["finished_at"] = _now()
+            if metadata:
+                runs[run_id].update(metadata)
+            self._write(runs)
+
+    async def fail_run(self, run_id: str, error: str, metadata: dict | None = None) -> None:
+        runs = self._read()
+        if run_id in runs:
+            runs[run_id]["status"] = "error"
+            runs[run_id]["error"] = error
+            runs[run_id]["finished_at"] = _now()
+            if metadata:
+                runs[run_id].update(metadata)
             self._write(runs)
 
     async def get_run(self, run_id: str) -> dict | None:
@@ -63,12 +75,15 @@ class RunStore:
                 "config": v["config"],
                 "created_at": v["created_at"],
                 "finished_at": v["finished_at"],
+                "fallback_used": v.get("fallback_used", False),
+                "world_pack": v.get("world_pack"),
+                "artifact_dir": v.get("artifact_dir"),
             }
             for v in runs.values()
         ]
         return sorted(summaries, key=lambda r: r["created_at"], reverse=True)
 
-    # ── Events (in-memory for SSE) ─────────────────────────────────────────
+    # -- Events (in-memory for SSE) ----------------------------------------
 
     async def append_event(self, run_id: str, payload: dict) -> None:
         if run_id not in self._events:
@@ -78,17 +93,17 @@ class RunStore:
     async def get_events(self, run_id: str, since: int = 0) -> list[dict]:
         return self._events.get(run_id, [])[since:]
 
-    # ── File helpers ───────────────────────────────────────────────────────
+    # -- File helpers -------------------------------------------------------
 
     def _read(self) -> dict[str, Any]:
         if not os.path.exists(self.runs_file):
             return {}
-        with open(self.runs_file) as f:
-            return json.load(f)
+        with open(self.runs_file, encoding="utf-8") as handle:
+            return json.load(handle)
 
     def _write(self, data: dict) -> None:
-        with open(self.runs_file, "w") as f:
-            json.dump(data, f, indent=2)
+        with open(self.runs_file, "w", encoding="utf-8") as handle:
+            json.dump(data, handle, indent=2)
 
 
 def _now() -> str:
