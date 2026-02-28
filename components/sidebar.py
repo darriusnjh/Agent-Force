@@ -43,8 +43,8 @@ def render_sidebar(backend_alive: bool = False) -> dict:
         # ── Agent selection ───────────────────────────────────────────────────
         agent = st.selectbox(
             "Agent Under Test",
-            ["email", "web_search", "code_exec", "custom"],
-            help="Select which pre-built agent to evaluate",
+            ["email", "web_search", "code_exec", "jira"],
+            help="Select which built-in agent to evaluate",
         )
 
         agent_model = st.selectbox(
