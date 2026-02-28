@@ -17,6 +17,7 @@ import json
 import os
 import uuid
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any, AsyncGenerator, Literal
 
 from dotenv import load_dotenv
@@ -521,16 +522,65 @@ async def _run_attack_campaign(run_id: str, req: AttackRunRequest) -> None:
     }
 
     report = await run_attack(sandbox=sandbox, payload=payload)
-    await store.finish_run(
-        run_id,
-        [
-            {
-                "agent": "attack_agent",
-                "mode": "defensive_red_team",
-                "report": report,
-            }
-        ],
+    results_payload = [
+        {
+            "agent": "attack_agent",
+            "mode": "defensive_red_team",
+            "report": report,
+        }
+    ]
+    metadata = _write_attack_artifacts(
+        run_id=run_id,
+        request=req,
+        report=report,
+        results_payload=results_payload,
     )
+    await store.finish_run(run_id, results_payload, metadata=metadata)
+
+
+def _write_attack_artifacts(
+    *,
+    run_id: str,
+    request: AttackRunRequest,
+    report: dict[str, Any],
+    results_payload: list[dict[str, Any]],
+) -> dict[str, str]:
+    root = Path(os.getenv("AGENTFORCE_ARTIFACTS_DIR", "artifacts"))
+    run_dir = root / "runs" / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    config_path = run_dir / "config.json"
+    scorecard_path = run_dir / "scorecard.json"
+    report_path = run_dir / "attack_report.json"
+    summary_path = run_dir / "attack_summary.json"
+
+    config_path.write_text(json.dumps(request.model_dump(), indent=2, ensure_ascii=True), encoding="utf-8")
+    scorecard_path.write_text(
+        json.dumps({"mode": "attack", "results": results_payload}, indent=2, ensure_ascii=True),
+        encoding="utf-8",
+    )
+    report_path.write_text(json.dumps(report, indent=2, ensure_ascii=True), encoding="utf-8")
+    summary_path.write_text(
+        json.dumps(
+            {
+                "run_id": run_id,
+                "mode": "attack",
+                "status": "done",
+                "summary": report.get("summary", {}),
+            },
+            indent=2,
+            ensure_ascii=True,
+        ),
+        encoding="utf-8",
+    )
+
+    return {
+        "artifact_dir": str(run_dir),
+        "config_path": str(config_path),
+        "scorecard_path": str(scorecard_path),
+        "summary_path": str(summary_path),
+        "attack_report_path": str(report_path),
+    }
 
 
 def _scorecard_to_dict(sc) -> dict[str, Any]:
@@ -573,6 +623,19 @@ def _agent_summary_from_results(results: list[dict] | None) -> list[dict]:
 
         scorecard = item.get("scorecard")
         if not isinstance(scorecard, dict):
+            report = item.get("report")
+            if isinstance(report, dict):
+                report_summary = report.get("summary", {})
+                summaries.append(
+                    {
+                        "agent": item.get("agent"),
+                        "mode": item.get("mode", "attack"),
+                        "total_tests": report_summary.get("total_tests"),
+                        "total_findings": report_summary.get("total_findings"),
+                        "max_severity": report_summary.get("max_severity"),
+                        "categories_tested": report_summary.get("categories_tested", []),
+                    }
+                )
             continue
 
         all_flags = scorecard.get("all_flags")
@@ -602,6 +665,7 @@ def _compact_run_payload(run_id: str, run: dict[str, Any], results: list[dict] |
         "status": run.get("status"),
         "created_at": run.get("created_at"),
         "finished_at": run.get("finished_at"),
+        "mode": config.get("mode", "benchmark"),
         "config": config,
         "fallback_used": run.get("fallback_used", False),
         "world_pack": run.get("world_pack"),
@@ -613,6 +677,7 @@ def _compact_run_payload(run_id: str, run: dict[str, Any], results: list[dict] |
         "trace_path": run.get("trace_path"),
         "violations_path": run.get("violations_path"),
         "summary_path": run.get("summary_path"),
+        "attack_report_path": run.get("attack_report_path"),
         "overall_score": run.get("overall_score"),
         "result_count": run.get("result_count"),
         "summary": {
@@ -692,15 +757,34 @@ async def create_attack_run(req: AttackRunRequest) -> RunCreated:
             await store.append_event(run_id, {"type": "attack_complete"})
         except Exception as exc:
             await store.append_event(run_id, {"type": "attack_error", "error": str(exc)})
+            error_report = {
+                "run_id": run_id,
+                "summary": {
+                    "total_tests": 0,
+                    "total_findings": 0,
+                    "max_severity": 0.0,
+                    "categories_tested": [],
+                },
+                "error": str(exc),
+            }
+            error_results = [
+                {
+                    "agent": "attack_agent",
+                    "mode": "defensive_red_team",
+                    "error": str(exc),
+                    "report": error_report,
+                }
+            ]
+            metadata = _write_attack_artifacts(
+                run_id=run_id,
+                request=req,
+                report=error_report,
+                results_payload=error_results,
+            )
             await store.finish_run(
                 run_id,
-                [
-                    {
-                        "agent": "attack_agent",
-                        "mode": "defensive_red_team",
-                        "error": str(exc),
-                    }
-                ],
+                error_results,
+                metadata=metadata,
             )
 
     asyncio.create_task(_runner())

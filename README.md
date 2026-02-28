@@ -96,7 +96,7 @@ This will:
 
 ## REST API
 
-The FastAPI server lets any frontend trigger evaluations and stream live results. Run metadata is persisted to `runs.json`, while full scorecards are stored in `artifacts/runs/<run_id>/scorecard.json` to keep `runs.json` readable.
+The FastAPI server lets any frontend trigger evaluations and stream live results. Each run persists state at `artifacts/runs/<run_id>/run.json`, and detailed outputs are stored in the same run folder (for example `scorecard.json` or `attack_report.json`).
 
 Start the server:
 
@@ -473,7 +473,7 @@ Agent-Force/
 │
 └── api/                     # REST API
     ├── server.py            # FastAPI app — all endpoints
-    └── store.py             # simple JSON run persistence (artifacts/runs.json)
+    └── store.py             # run-state persistence (artifacts/runs/<run_id>/run.json)
 ```
 
 ---

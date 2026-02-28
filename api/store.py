@@ -1,8 +1,7 @@
-"""JSON-file run store — simple persistence for demo purposes.
+"""Artifact-folder run store.
 
-Runs are stored in artifacts/runs.json as a dict keyed by run_id.
-Events (for SSE streaming) are kept in-memory only — they are
-ephemeral and only needed while the server is running.
+Each run is persisted at `artifacts/runs/<run_id>/run.json`.
+Events used for SSE streaming are kept in-memory only.
 """
 
 from __future__ import annotations
@@ -10,28 +9,28 @@ from __future__ import annotations
 import json
 import os
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
-RUNS_FILE = os.getenv("AGENTFORCE_RUNS_FILE", "artifacts/runs.json")
+ARTIFACTS_DIR = os.getenv("AGENTFORCE_ARTIFACTS_DIR", "artifacts")
 
 
 class RunStore:
-    """Persists evaluation runs to a JSON file; events are in-memory."""
+    """Persists run state in artifact folders; events are in-memory."""
 
-    def __init__(self, runs_file: str = RUNS_FILE) -> None:
-        self.runs_file = runs_file
+    def __init__(self, artifacts_dir: str = ARTIFACTS_DIR) -> None:
+        self.artifacts_dir = Path(artifacts_dir)
+        self.runs_dir = self.artifacts_dir / "runs"
         self._events: dict[str, list[dict]] = {}  # run_id -> [event, ...]
 
     async def init(self) -> None:
-        """Create the runs file if it doesn't exist."""
-        if not os.path.exists(self.runs_file):
-            self._write({})
+        """Ensure run artifact folders exist."""
+        self.runs_dir.mkdir(parents=True, exist_ok=True)
 
     # -- Runs ---------------------------------------------------------------
 
     async def create_run(self, run_id: str, config: dict) -> None:
-        runs = self._read()
-        runs[run_id] = {
+        run_record = {
             "run_id": run_id,
             "status": "running",
             "config": config,
@@ -39,37 +38,41 @@ class RunStore:
             "created_at": _now(),
             "finished_at": None,
         }
-        self._write(runs)
+        self._write_run(run_id, run_record)
         self._events[run_id] = []
 
     async def finish_run(self, run_id: str, results: list[dict], metadata: dict | None = None) -> None:
-        runs = self._read()
-        if run_id in runs:
-            runs[run_id]["status"] = "done"
-            runs[run_id]["results"] = None
-            runs[run_id]["result_count"] = len(results)
+        run = self._read_run(run_id)
+        if run is None:
+            return
 
-            overall_scores = _extract_overall_scores(results)
-            if overall_scores:
-                runs[run_id]["overall_score"] = sum(overall_scores) / len(overall_scores)
+        run["status"] = "done"
+        run["results"] = None
+        run["result_count"] = len(results)
 
-            runs[run_id]["finished_at"] = _now()
-            if metadata:
-                runs[run_id].update(metadata)
-            self._write(runs)
+        overall_scores = _extract_overall_scores(results)
+        if overall_scores:
+            run["overall_score"] = sum(overall_scores) / len(overall_scores)
+
+        run["finished_at"] = _now()
+        if metadata:
+            run.update(metadata)
+        self._write_run(run_id, run)
 
     async def fail_run(self, run_id: str, error: str, metadata: dict | None = None) -> None:
-        runs = self._read()
-        if run_id in runs:
-            runs[run_id]["status"] = "error"
-            runs[run_id]["error"] = error
-            runs[run_id]["finished_at"] = _now()
-            if metadata:
-                runs[run_id].update(metadata)
-            self._write(runs)
+        run = self._read_run(run_id)
+        if run is None:
+            return
+
+        run["status"] = "error"
+        run["error"] = error
+        run["finished_at"] = _now()
+        if metadata:
+            run.update(metadata)
+        self._write_run(run_id, run)
 
     async def get_run(self, run_id: str, *, include_results: bool = True) -> dict | None:
-        run = self._read().get(run_id)
+        run = self._read_run(run_id)
         if run is None:
             return None
         if not include_results:
@@ -77,8 +80,7 @@ class RunStore:
         return self._hydrate_results(run)
 
     async def list_runs(self) -> list[dict]:
-        runs = self._read()
-        # Return summary (no results blob) sorted newest first
+        runs = self._list_run_records()
         summaries = [
             {
                 "run_id": v["run_id"],
@@ -92,7 +94,7 @@ class RunStore:
                 "overall_score": v.get("overall_score"),
                 "result_count": v.get("result_count"),
             }
-            for v in runs.values()
+            for v in runs
         ]
         return sorted(summaries, key=lambda r: r["created_at"], reverse=True)
 
@@ -108,18 +110,47 @@ class RunStore:
 
     # -- File helpers -------------------------------------------------------
 
-    def _read(self) -> dict[str, Any]:
-        if not os.path.exists(self.runs_file):
-            return {}
-        with open(self.runs_file, encoding="utf-8") as handle:
-            return json.load(handle)
+    def _run_dir(self, run_id: str) -> Path:
+        return self.runs_dir / run_id
 
-    def _write(self, data: dict) -> None:
-        runs_dir = os.path.dirname(self.runs_file)
-        if runs_dir:
-            os.makedirs(runs_dir, exist_ok=True)
-        with open(self.runs_file, "w", encoding="utf-8") as handle:
-            json.dump(data, handle, indent=2)
+    def _run_state_path(self, run_id: str) -> Path:
+        return self._run_dir(run_id) / "run.json"
+
+    def _read_run(self, run_id: str) -> dict[str, Any] | None:
+        state_path = self._run_state_path(run_id)
+        if not state_path.exists():
+            return None
+
+        try:
+            payload = json.loads(state_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            return None
+
+        return payload if isinstance(payload, dict) else None
+
+    def _write_run(self, run_id: str, payload: dict[str, Any]) -> None:
+        state_path = self._run_state_path(run_id)
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        state_path.write_text(json.dumps(payload, indent=2, ensure_ascii=True), encoding="utf-8")
+
+    def _list_run_records(self) -> list[dict[str, Any]]:
+        if not self.runs_dir.exists():
+            return []
+
+        records: list[dict[str, Any]] = []
+        for child in self.runs_dir.iterdir():
+            if not child.is_dir():
+                continue
+            state_path = child / "run.json"
+            if not state_path.exists():
+                continue
+            try:
+                payload = json.loads(state_path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                continue
+            if isinstance(payload, dict) and payload.get("run_id"):
+                records.append(payload)
+        return records
 
     def _hydrate_results(self, run: dict[str, Any]) -> dict[str, Any]:
         if run.get("results") is not None:

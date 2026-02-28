@@ -2,12 +2,12 @@ import asyncio
 import json
 import os
 import shutil
+from pathlib import Path
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
 # Set env vars before importing app/store singletons.
-os.environ["AGENTFORCE_RUNS_FILE"] = "test_runs.json"
 os.environ["AGENTFORCE_ARTIFACTS_DIR"] = "test_artifacts"
 os.environ["AGENT_MODEL"] = "ollama/llama3.2"
 os.environ["SCORER_MODEL"] = "ollama/llama3.2"
@@ -17,15 +17,11 @@ from api.server import app  # noqa: E402
 
 @pytest.fixture(autouse=True)
 def cleanup():
-    if os.path.exists("test_runs.json"):
-        os.remove("test_runs.json")
     if os.path.exists("test_artifacts"):
         shutil.rmtree("test_artifacts")
 
     yield
 
-    if os.path.exists("test_runs.json"):
-        os.remove("test_runs.json")
     if os.path.exists("test_artifacts"):
         shutil.rmtree("test_artifacts")
 
@@ -170,7 +166,7 @@ async def test_run_writes_artifact_folder_contract():
 
 
 @pytest.mark.asyncio
-async def test_runs_json_compacts_results_blob_but_get_run_hydrates():
+async def test_run_state_is_persisted_in_artifacts_and_get_run_hydrates():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         response = await ac.post(
             "/runs",
@@ -195,12 +191,13 @@ async def test_runs_json_compacts_results_blob_but_get_run_hydrates():
         full_run_data = full_response.json()
         assert full_run_data["results"]
 
-        with open("test_runs.json", encoding="utf-8") as handle:
-            persisted = json.load(handle)
+        run_state_path = Path("test_artifacts") / "runs" / run_id / "run.json"
+        assert run_state_path.exists()
+        persisted = json.loads(run_state_path.read_text(encoding="utf-8"))
 
-        assert persisted[run_id]["results"] is None
-        assert persisted[run_id]["result_count"] == len(full_run_data["results"])
-        assert isinstance(persisted[run_id]["overall_score"], float)
+        assert persisted["results"] is None
+        assert persisted["result_count"] == len(full_run_data["results"])
+        assert isinstance(persisted["overall_score"], float)
 
 
 @pytest.mark.asyncio
@@ -292,8 +289,21 @@ async def test_create_attack_run():
         )
         assert response.status_code == 202
         data = response.json()
-        assert "run_id" in data
+        run_id = data["run_id"]
         assert data["status"] == "running"
+
+        run_data = await _wait_until_finished(ac, run_id)
+        assert run_data["status"] == "done"
+        assert os.path.exists(run_data["artifact_dir"])
+        assert os.path.exists(run_data["attack_report_path"])
+        assert os.path.exists(run_data["summary_path"])
+
+        full_response = await ac.get(f"/runs/{run_id}", params={"view": "full"})
+        assert full_response.status_code == 200
+        full_payload = full_response.json()
+        assert full_payload["results"]
+        assert full_payload["results"][0]["agent"] == "attack_agent"
+        assert "report" in full_payload["results"][0]
 
 
 @pytest.mark.asyncio
