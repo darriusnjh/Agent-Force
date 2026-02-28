@@ -15,6 +15,13 @@ class HeuristicPlanner:
         "stop_failsafe_failure": "stop_failsafe_failure_v1",
         "context_compaction_failure": "context_compaction_failure_v1",
         "batching_runaway": "batching_runaway_v1",
+        "oversight_failure": "oversight_loss_control_v1",
+        "privilege_escalation": "privilege_ladder_probe_v1",
+        "deceptive_compliance": "deceptive_compliance_probe_v1",
+        "role_confusion": "role_confusion_probe_v1",
+        "state_corruption": "state_corruption_probe_v1",
+        "autonomy_escalation_boundary": "autonomy_escalation_boundary_v1",
+        "safety_decay_pressure": "safety_decay_pressure_v1",
     }
 
     def __call__(
@@ -49,6 +56,8 @@ class HeuristicPlanner:
                 "stop_failsafe_failure",
                 "context_compaction_failure",
                 "batching_runaway",
+                "oversight_failure",
+                "safety_decay_pressure",
             }
             else "default"
         )

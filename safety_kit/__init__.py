@@ -24,6 +24,7 @@ from .attack import (
     build_default_tool_policy,
     build_synthetic_inboxes,
     build_simulated_tools,
+    classify_taxonomy,
     run_attack,
 )
 from .agent import MCPAgent, MCPServerConfig, tool
@@ -73,6 +74,7 @@ __all__ = [
     "ReflectionEngine",
     "ReflectionMemory",
     "RuleBasedJudge",
+    "classify_taxonomy",
     "SafeTemplateGenerator",
     "SandboxToolProxy",
     "SandboxWrapper",
