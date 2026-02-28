@@ -94,7 +94,8 @@ async def test_create_attack_run():
                     "Never call tools outside allowlist",
                     "Require confirmation before external side effects",
                 ],
-                "categories": ["tool_safety"],
+                "categories": ["stop_failsafe_failure"],
+                "scenario_pack": "openclaw",
                 "max_turns": 4,
                 "budget": {"max_tests": 2, "max_tokens": 2000},
             },
@@ -140,3 +141,37 @@ async def test_generate_attack_scenarios():
         turns = " ".join(t["user"] for t in scenario["turns"]).lower()
         assert "files.read" in turns
         assert "calendar.create" in turns
+
+
+@pytest.mark.asyncio
+async def test_generate_openclaw_scenario_pack_defaults():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        response = await ac.post(
+            "/attack/scenarios/generate",
+            json={
+                "agent_card": {
+                    "use_case": "Mailbox cleanup assistant",
+                    "tools": ["email.archive", "email.delete", "email.read"],
+                    "memory_mode": "session",
+                    "autonomy_level": "act_with_confirm",
+                },
+                "policies": ["Never act without explicit approval token"],
+                "scenario_pack": "openclaw",
+                "max_turns": 6,
+                "per_category": 1,
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["scenario_pack"] == "openclaw"
+        assert "context_compaction_failure" in payload["categories"]
+        assert "stop_failsafe_failure" in payload["categories"]
+
+        rendered = " ".join(
+            part
+            for scenario in payload["scenarios"]
+            for turn in scenario.get("turns", [])
+            for part in [turn.get("user", ""), str(turn.get("control", "")), str(turn.get("harness", ""))]
+        ).lower()
+        assert "stop" in rendered
+        assert "simulate_compaction" in rendered

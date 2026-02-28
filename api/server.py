@@ -33,6 +33,15 @@ AGENT_MODEL = os.getenv("AGENT_MODEL", "openai/gpt-4o-mini")
 SCORER_MODEL = os.getenv("SCORER_MODEL", "openai/gpt-4o-mini")
 ADAPTIVE_MODEL = os.getenv("ADAPTIVE_MODEL", SCORER_MODEL)
 
+ATTACK_DEFAULT_CATEGORIES = ["data_boundary", "tool_safety", "memory_integrity", "goal_drift"]
+ATTACK_OPENCLAW_CATEGORIES = [
+    "context_compaction_failure",
+    "confirmation_gate_failure",
+    "stop_failsafe_failure",
+    "batching_runaway",
+]
+ATTACK_VALID_CATEGORIES = set(ATTACK_DEFAULT_CATEGORIES + ATTACK_OPENCLAW_CATEGORIES)
+
 
 # ---------------------------------------------------------------------------
 # Lifespan / store
@@ -125,17 +134,23 @@ class AttackBudget(BaseModel):
     max_tokens: int = 8000
 
 
+class AttackInboxConfig(BaseModel):
+    toy_count: int = 10
+    realistic_count: int = 5000
+    canary_count: int = 5
+
+
 class AttackRunRequest(BaseModel):
     """Configuration for a new defensive attack/test run."""
 
     target_agent: AttackTarget
     agent_card: AgentCard
     policies: list[str] = Field(default_factory=list)
-    categories: list[str] = Field(
-        default_factory=lambda: ["data_boundary", "tool_safety", "memory_integrity", "goal_drift"]
-    )
+    categories: list[str] = Field(default_factory=list)
+    scenario_pack: Literal["default", "openclaw"] = "default"
     max_turns: int = 8
     budget: AttackBudget = Field(default_factory=AttackBudget)
+    inbox: AttackInboxConfig = Field(default_factory=AttackInboxConfig)
     artifacts: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -144,11 +159,11 @@ class AttackScenarioRequest(BaseModel):
 
     agent_card: AgentCard
     policies: list[str] = Field(default_factory=list)
-    categories: list[str] = Field(
-        default_factory=lambda: ["data_boundary", "tool_safety", "memory_integrity", "goal_drift"]
-    )
+    categories: list[str] = Field(default_factory=list)
+    scenario_pack: Literal["default", "openclaw"] = "default"
     max_turns: int = 8
     per_category: int = 2
+    inbox: AttackInboxConfig = Field(default_factory=AttackInboxConfig)
     artifacts: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -270,11 +285,26 @@ async def _run_evaluation(run_id: str, req: RunRequest) -> None:
     await store.finish_run(run_id, results)
 
 
-def _default_attack_artifacts() -> dict[str, Any]:
+def _default_attack_artifacts(inbox_cfg: AttackInboxConfig | None = None) -> dict[str, Any]:
     """Synthetic artifacts exposed to the attack sandbox."""
-    from safety_kit.attack import build_default_attack_artifacts
+    from safety_kit.attack import SyntheticInboxConfig, build_default_attack_artifacts
 
-    return build_default_attack_artifacts()
+    cfg = None
+    if inbox_cfg is not None:
+        cfg = SyntheticInboxConfig(
+            toy_count=max(1, int(inbox_cfg.toy_count)),
+            realistic_count=max(1, int(inbox_cfg.realistic_count)),
+            canary_count=max(0, int(inbox_cfg.canary_count)),
+        )
+    return build_default_attack_artifacts(cfg)
+
+
+def _resolve_attack_categories(categories: list[str], scenario_pack: str) -> list[str]:
+    if categories:
+        return categories
+    if scenario_pack == "openclaw":
+        return list(ATTACK_OPENCLAW_CATEGORIES)
+    return list(ATTACK_DEFAULT_CATEGORIES)
 
 
 async def _run_attack_campaign(run_id: str, req: AttackRunRequest) -> None:
@@ -290,8 +320,9 @@ async def _run_attack_campaign(run_id: str, req: AttackRunRequest) -> None:
     )
 
     agent_card = req.agent_card.model_dump()
+    categories = _resolve_attack_categories(req.categories, req.scenario_pack)
     policy = build_default_tool_policy(agent_card)
-    artifacts = _default_attack_artifacts()
+    artifacts = _default_attack_artifacts(req.inbox)
     artifacts.update(req.artifacts)
 
     tool_proxy = SandboxToolProxy(
@@ -315,7 +346,8 @@ async def _run_attack_campaign(run_id: str, req: AttackRunRequest) -> None:
         "run_id": run_id,
         "agent_card": agent_card,
         "policies": req.policies,
-        "categories": req.categories,
+        "categories": categories,
+        "scenario_pack": req.scenario_pack,
         "max_turns": req.max_turns,
         "budget": req.budget.model_dump(),
         "artifacts": artifacts,
@@ -395,16 +427,17 @@ async def create_run(req: RunRequest) -> RunCreated:
 async def create_attack_run(req: AttackRunRequest) -> RunCreated:
     """Start a defensive attack/test campaign run."""
 
-    valid_categories = {"data_boundary", "tool_safety", "memory_integrity", "goal_drift"}
-    bad = [cat for cat in req.categories if cat not in valid_categories]
+    categories = _resolve_attack_categories(req.categories, req.scenario_pack)
+    bad = [cat for cat in categories if cat not in ATTACK_VALID_CATEGORIES]
     if bad:
-        raise HTTPException(400, f"Unknown category(ies): {bad}. Valid: {sorted(valid_categories)}")
+        raise HTTPException(400, f"Unknown category(ies): {bad}. Valid: {sorted(ATTACK_VALID_CATEGORIES)}")
 
     if req.max_turns < 1 or req.max_turns > 20:
         raise HTTPException(400, "max_turns must be between 1 and 20")
 
     run_id = str(uuid.uuid4())
     config = {"mode": "attack", **req.model_dump()}
+    config["resolved_categories"] = categories
     await store.create_run(run_id, config)
 
     async def _runner() -> None:
@@ -433,31 +466,33 @@ async def generate_attack_scenarios(req: AttackScenarioRequest) -> dict[str, Any
     """Generate contextualized defensive test scenarios from agent metadata."""
     from safety_kit.attack import SafeTemplateGenerator
 
-    valid_categories = {"data_boundary", "tool_safety", "memory_integrity", "goal_drift"}
-    bad = [cat for cat in req.categories if cat not in valid_categories]
+    categories = _resolve_attack_categories(req.categories, req.scenario_pack)
+    bad = [cat for cat in categories if cat not in ATTACK_VALID_CATEGORIES]
     if bad:
-        raise HTTPException(400, f"Unknown category(ies): {bad}. Valid: {sorted(valid_categories)}")
+        raise HTTPException(400, f"Unknown category(ies): {bad}. Valid: {sorted(ATTACK_VALID_CATEGORIES)}")
     if req.max_turns < 1 or req.max_turns > 20:
         raise HTTPException(400, "max_turns must be between 1 and 20")
     if req.per_category < 1 or req.per_category > 10:
         raise HTTPException(400, "per_category must be between 1 and 10")
 
-    artifacts = _default_attack_artifacts()
+    artifacts = _default_attack_artifacts(req.inbox)
     artifacts.update(req.artifacts)
 
     generator = SafeTemplateGenerator()
     scenarios = generator.synthesize_scenarios(
         agent_card=req.agent_card.model_dump(),
         policies=req.policies,
-        categories=req.categories,
+        categories=categories,
         max_turns=req.max_turns,
         artifacts=artifacts,
         tool_specs=req.agent_card.tool_specs,
         per_category=req.per_category,
+        scenario_pack=req.scenario_pack,
     )
     return {
         "count": len(scenarios),
-        "categories": req.categories,
+        "categories": categories,
+        "scenario_pack": req.scenario_pack,
         "scenarios": scenarios,
     }
 

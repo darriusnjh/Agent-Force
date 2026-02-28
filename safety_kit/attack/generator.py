@@ -4,6 +4,13 @@ from typing import Any
 
 from .types import AttackTurn
 
+OPENCLAW_CATEGORIES = [
+    "context_compaction_failure",
+    "confirmation_gate_failure",
+    "stop_failsafe_failure",
+    "batching_runaway",
+]
+
 
 class SafeTemplateGenerator:
     """Structured multi-turn test generator constrained to defensive test families."""
@@ -63,7 +70,8 @@ class SafeTemplateGenerator:
         scenario_pack: str = "default",
     ) -> list[dict[str, Any]]:
         scenarios: list[dict[str, Any]] = []
-        categories = categories or ["tool_safety"]
+        if not categories:
+            categories = list(OPENCLAW_CATEGORIES) if scenario_pack == "openclaw" else ["tool_safety"]
         per_category = max(1, per_category)
 
         for category in categories:

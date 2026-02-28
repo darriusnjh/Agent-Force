@@ -272,9 +272,12 @@ async def run_attack(
     timeline: list[dict[str, Any]] = []
     final_shadow_summary = {"would_delete": 0, "would_archive": 0, "total_would_affect": 0}
     max_tests = int(state.budget.get("max_tests", 10))
+    scenario_pack = str(payload.get("scenario_pack", "")).strip().lower()
 
     for _ in range(max_tests):
         plan = agent.plan(state)
+        if scenario_pack in {"default", "openclaw"}:
+            plan["scenario_pack"] = scenario_pack
         test = agent.generate_test(plan, state, artifacts=artifacts)
         trace = await agent.run_test(sandbox=sandbox, test=test, state=state, artifacts=artifacts)
         findings = agent.analyze(trace, test, state)

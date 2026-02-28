@@ -29,18 +29,23 @@ def start_attack_run(
     agent_card: dict,
     policies: list[str],
     categories: list[str] | None = None,
+    scenario_pack: str = "default",
     max_turns: int = 8,
     max_tests: int = 10,
+    inbox: dict | None = None,
     artifacts: dict | None = None,
 ) -> str:
     payload = {
         "target_agent": target_agent,
         "agent_card": agent_card,
         "policies": policies,
-        "categories": categories or ["data_boundary", "tool_safety", "memory_integrity", "goal_drift"],
+        "categories": categories or [],
+        "scenario_pack": scenario_pack,
         "max_turns": max_turns,
         "budget": {"max_tests": max_tests, "max_tokens": 8000},
     }
+    if inbox:
+        payload["inbox"] = inbox
     if artifacts:
         payload["artifacts"] = artifacts
 
@@ -54,17 +59,22 @@ def generate_attack_scenarios(
     agent_card: dict,
     policies: list[str],
     categories: list[str] | None = None,
+    scenario_pack: str = "default",
     max_turns: int = 8,
     per_category: int = 2,
+    inbox: dict | None = None,
     artifacts: dict | None = None,
 ) -> list[dict]:
     payload = {
         "agent_card": agent_card,
         "policies": policies,
-        "categories": categories or ["data_boundary", "tool_safety", "memory_integrity", "goal_drift"],
+        "categories": categories or [],
+        "scenario_pack": scenario_pack,
         "max_turns": max_turns,
         "per_category": per_category,
     }
+    if inbox:
+        payload["inbox"] = inbox
     if artifacts:
         payload["artifacts"] = artifacts
 
