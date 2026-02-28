@@ -47,6 +47,78 @@ ATTACK_CATEGORIES = [
     "batching_runaway",
 ]
 
+SANDBOX_PROFILE_DESCRIPTIONS = {
+    "auto": "Automatically picks a profile based on use case and tools.",
+    "email": "Mailbox-heavy data with canary emails, sensitive threads, and cleanup workflows.",
+    "web_search": "Web pages, internal/public boundaries, and crawler/export risk artifacts.",
+    "code_exec": "Repo-like files, .env secrets, and execution/corruption fixtures.",
+    "finance_ops": "Ledger, payments, and finance secret artifacts for high-risk side-effect tests.",
+    "customer_support": "Tickets, KB content, and role-confusion artifacts for support assistants.",
+    "devops_incident": "Incident logs, runbooks, infra assets, and privileged operational artifacts.",
+    "generic": "General mixed artifacts when no domain profile fits.",
+}
+
+SANDBOX_PROFILE_TOOL_CATALOG = {
+    "email": [
+        "email.search",
+        "email.read",
+        "email.archive",
+        "email.delete",
+        "email.count",
+        "inbox.switch",
+        "files.read",
+        "files.list",
+    ],
+    "web_search": [
+        "web.search",
+        "web.read",
+        "webhook.send",
+        "files.read",
+        "files.list",
+    ],
+    "code_exec": [
+        "repo.list_files",
+        "files.read",
+        "files.list",
+        "state.corrupt",
+        "queue.batch_run",
+        "webhook.send",
+    ],
+    "finance_ops": [
+        "ledger.query",
+        "payments.list_batches",
+        "webhook.send",
+        "files.read",
+        "files.list",
+        "admin.read",
+    ],
+    "customer_support": [
+        "ticket.search",
+        "ticket.read",
+        "kb.read",
+        "role.message",
+        "files.read",
+        "files.list",
+    ],
+    "devops_incident": [
+        "incident.query",
+        "runbook.read",
+        "infra.assets.list",
+        "admin.read",
+        "state.corrupt",
+        "files.read",
+        "files.list",
+    ],
+    "generic": [
+        "files.read",
+        "files.list",
+        "webhook.send",
+        "role.message",
+        "queue.batch_run",
+        "state.corrupt",
+    ],
+}
+
 
 def _parse_csv_items(raw: str) -> list[str]:
     return [item.strip() for item in (raw or "").split(",") if item.strip()]
@@ -385,6 +457,18 @@ with tab_attack:
 - `Max Privilege`: highest tool privilege the target is expected to use in sandbox.
 """
         )
+    with st.expander("Available Sandbox Profiles and Tools", expanded=False):
+        profile_rows = []
+        for profile_name, description in SANDBOX_PROFILE_DESCRIPTIONS.items():
+            tools_preview = SANDBOX_PROFILE_TOOL_CATALOG.get(profile_name, [])
+            profile_rows.append(
+                {
+                    "profile": profile_name,
+                    "description": description,
+                    "example_tools": ", ".join(tools_preview[:6]),
+                }
+            )
+        st.dataframe(profile_rows, hide_index=True, use_container_width=True)
 
     default_tools = {
         "email": "email.search,email.read,email.archive,email.delete,files.read",
@@ -473,6 +557,13 @@ with tab_attack:
             ["shadow", "safe"],
             help="`shadow` records would-have-happened impact; `safe` hard-blocks destructive actions.",
         )
+        sandbox_profile = st.selectbox(
+            "Sandbox Data Profile",
+            ["auto", "email", "web_search", "code_exec", "finance_ops", "customer_support", "devops_incident", "generic"],
+            index=0,
+            help="Select which synthetic environment artifacts are loaded for scenario execution.",
+        )
+        st.caption(SANDBOX_PROFILE_DESCRIPTIONS.get(sandbox_profile, "Synthetic sandbox profile"))
         max_turns = st.slider(
             "Max Turns",
             2,
@@ -495,7 +586,53 @@ with tab_attack:
             help="How many preview scenarios to generate for each selected category.",
         )
 
-    tools = _parse_csv_items(tools_input)
+    profile_for_tools = sandbox_profile
+    if profile_for_tools == "auto":
+        profile_for_tools = sandbox_agent if sandbox_agent in SANDBOX_PROFILE_TOOL_CATALOG else "generic"
+    recommended_tools = SANDBOX_PROFILE_TOOL_CATALOG.get(profile_for_tools, SANDBOX_PROFILE_TOOL_CATALOG["generic"])
+    typed_tools = _parse_csv_items(tools_input)
+
+    option_tools = sorted(set([*recommended_tools, *typed_tools]))
+    if "attack_tool_selector" not in st.session_state:
+        st.session_state["attack_tool_selector"] = typed_tools or recommended_tools
+    else:
+        selected = [
+            tool for tool in st.session_state.get("attack_tool_selector", []) if tool in option_tools
+        ]
+        if not selected:
+            selected = typed_tools or recommended_tools
+        st.session_state["attack_tool_selector"] = selected
+    if "attack_tool_source" not in st.session_state:
+        st.session_state["attack_tool_source"] = "Tool Selector (Recommended)"
+
+    _render_panel("TOOL SELECTION", "rgba(0,212,255,0.18)")
+    st.caption(
+        "Pick tools directly from the selected sandbox profile. "
+        "Use manual text only if your tool names differ."
+    )
+    st.multiselect(
+        "Profile Tool Selector",
+        options=option_tools,
+        key="attack_tool_selector",
+        help="Selected tools are used to generate boundary, approval, privilege, and memory safety tests.",
+    )
+    st.radio(
+        "Tool Input Source",
+        ["Tool Selector (Recommended)", "Manual Text Input"],
+        key="attack_tool_source",
+        horizontal=True,
+        help="Choose whether scenarios should use selected profile tools or the manual text list.",
+    )
+    st.caption(
+        "Testing tip: click 'Generate Dynamic Scenarios' and verify selected tools appear in the preview scripts."
+    )
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    if st.session_state.get("attack_tool_source") == "Manual Text Input":
+        tools = typed_tools
+    else:
+        tools = [str(tool).strip() for tool in st.session_state.get("attack_tool_selector", []) if str(tool).strip()]
+
     policies = [line.strip() for line in policy_input.splitlines() if line.strip()]
     tool_specs = _build_tool_specs(tools)
 
@@ -535,6 +672,7 @@ with tab_attack:
                     policies=policies,
                     categories=selected_categories,
                     scenario_pack=scenario_pack,
+                    sandbox_profile=sandbox_profile,
                     max_turns=max_turns,
                     per_category=per_category,
                     inbox={"toy_count": 10, "realistic_count": 5000, "canary_count": 5},
@@ -550,6 +688,23 @@ with tab_attack:
     if preview:
         _render_panel("SCENARIO PREVIEW", "rgba(123,97,255,0.22)")
         st.caption(f"{len(preview)} scenarios generated from your input.")
+        st.caption(
+            "Sandbox data profile: "
+            + SANDBOX_PROFILE_DESCRIPTIONS.get(sandbox_profile, sandbox_profile)
+        )
+        if tools:
+            rendered_preview = " ".join(
+                str(turn.get("user", ""))
+                for scenario in preview
+                for turn in scenario.get("turns", [])
+            ).lower()
+            covered_tools = [tool for tool in tools if str(tool).lower() in rendered_preview]
+            st.caption(
+                f"Tool coverage check: {len(covered_tools)}/{len(tools)} selected tools are explicitly referenced in preview scripts."
+            )
+            missing_tools = [tool for tool in tools if tool not in covered_tools]
+            if missing_tools:
+                st.caption(f"Not explicitly referenced yet: {', '.join(missing_tools[:8])}")
         for idx, scenario in enumerate(preview[:8], start=1):
             with st.expander(
                 f"Scenario {idx}: {scenario.get('category', 'unknown')} · {scenario.get('template_id', 'template')}"
@@ -573,6 +728,7 @@ with tab_attack:
                     categories=selected_categories,
                     scenario_pack=scenario_pack,
                     require_sandbox=True,
+                    sandbox_profile=sandbox_profile,
                     max_turns=max_turns,
                     max_tests=max_tests,
                     inbox={"toy_count": 10, "realistic_count": 5000, "canary_count": 5},

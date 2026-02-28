@@ -469,10 +469,20 @@ def build_default_tool_policy(agent_card: dict[str, Any]) -> ToolPolicy:
 
 def build_simulated_tools(artifacts: dict[str, Any]) -> dict[str, Callable[[dict[str, Any]], str]]:
     files = artifacts.setdefault("files", {})
+    artifacts.setdefault("sandbox_profile", "email")
     artifacts.setdefault("inbox", [])
     artifacts.setdefault("inbox_toy", list(artifacts.get("inbox", [])))
     artifacts.setdefault("inbox_large", list(artifacts.get("inbox", [])))
     artifacts.setdefault("active_inbox_key", "inbox")
+    artifacts.setdefault("web_pages", [])
+    artifacts.setdefault("finance_ledger", [])
+    artifacts.setdefault("payment_batches", [])
+    artifacts.setdefault("support_tickets", [])
+    artifacts.setdefault("kb_articles", [])
+    artifacts.setdefault("incident_log", [])
+    artifacts.setdefault("runbooks", {})
+    artifacts.setdefault("infra_assets", [])
+    artifacts.setdefault("repo_manifest", {})
     artifacts.setdefault(
         "privilege_ladder",
         {"user": 0, "elevated": 1, "admin": 2, "system": 3},
@@ -527,6 +537,42 @@ def build_simulated_tools(artifacts: dict[str, Any]) -> dict[str, Callable[[dict
         path = str(args.get("path", ""))
         return str(files.get(path, "FILE_NOT_FOUND"))
 
+    def files_list(args: dict[str, Any]) -> str:
+        prefix = str(args.get("prefix", "")).strip()
+        paths = sorted(str(path) for path in files.keys())
+        if prefix:
+            paths = [path for path in paths if path.startswith(prefix)]
+        limit = max(1, min(100, int(args.get("limit", 20))))
+        return json.dumps({"paths": paths[:limit]})
+
+    def web_search(args: dict[str, Any]) -> str:
+        query = str(args.get("query", "")).lower().strip()
+        pages = artifacts.get("web_pages", [])
+        if not isinstance(pages, list):
+            pages = []
+        if not query:
+            return json.dumps(pages[:5])
+        matched = [
+            page
+            for page in pages
+            if query in json.dumps(page).lower()
+        ]
+        return json.dumps(matched[:5])
+
+    def web_read(args: dict[str, Any]) -> str:
+        pages = artifacts.get("web_pages", [])
+        if not isinstance(pages, list) or not pages:
+            return "WEB_PAGE_NOT_FOUND"
+        url = str(args.get("url", "")).strip().lower()
+        if url:
+            for page in pages:
+                if str(page.get("url", "")).lower() == url:
+                    return json.dumps(page)
+        idx = int(args.get("index", 0))
+        if idx < 0 or idx >= len(pages):
+            return "WEB_PAGE_NOT_FOUND"
+        return json.dumps(pages[idx])
+
     def privilege_get(args: dict[str, Any]) -> str:
         requested = _normalize_privilege(str(args.get("requested", "user")))
         return json.dumps(
@@ -566,6 +612,98 @@ def build_simulated_tools(artifacts: dict[str, Any]) -> dict[str, Callable[[dict
         batch_state["processed"] += batch_size
         batch_state["pending"] = max(0, batch_state["pending"] - batch_size)
         return json.dumps(batch_state)
+
+    def ledger_query(args: dict[str, Any]) -> str:
+        ledger = artifacts.get("finance_ledger", [])
+        if not isinstance(ledger, list):
+            ledger = []
+        merchant = str(args.get("merchant", "")).strip().lower()
+        tag = str(args.get("tag", "")).strip().lower()
+        rows = ledger
+        if merchant:
+            rows = [row for row in rows if merchant in str(row.get("merchant", "")).lower()]
+        if tag:
+            rows = [row for row in rows if tag in str(row.get("tag", "")).lower()]
+        limit = max(1, min(100, int(args.get("limit", 20))))
+        return json.dumps(rows[:limit])
+
+    def payment_batches_list(args: dict[str, Any]) -> str:
+        del args
+        batches = artifacts.get("payment_batches", [])
+        return json.dumps(batches if isinstance(batches, list) else [])
+
+    def ticket_search(args: dict[str, Any]) -> str:
+        query = str(args.get("query", "")).strip().lower()
+        tickets = artifacts.get("support_tickets", [])
+        if not isinstance(tickets, list):
+            tickets = []
+        if not query:
+            return json.dumps(tickets[:5])
+        matched = [ticket for ticket in tickets if query in json.dumps(ticket).lower()]
+        return json.dumps(matched[:10])
+
+    def ticket_read(args: dict[str, Any]) -> str:
+        tickets = artifacts.get("support_tickets", [])
+        if not isinstance(tickets, list):
+            tickets = []
+        ticket_id = str(args.get("ticket_id", "")).strip().lower()
+        if ticket_id:
+            for ticket in tickets:
+                if str(ticket.get("ticket_id", "")).lower() == ticket_id:
+                    return json.dumps(ticket)
+        idx = int(args.get("index", 0))
+        if idx < 0 or idx >= len(tickets):
+            return "TICKET_NOT_FOUND"
+        return json.dumps(tickets[idx])
+
+    def kb_read(args: dict[str, Any]) -> str:
+        articles = artifacts.get("kb_articles", [])
+        if not isinstance(articles, list):
+            articles = []
+        article_id = str(args.get("id", "")).strip().lower()
+        if article_id:
+            for article in articles:
+                if str(article.get("id", "")).lower() == article_id:
+                    return json.dumps(article)
+        idx = int(args.get("index", 0))
+        if idx < 0 or idx >= len(articles):
+            return "KB_ARTICLE_NOT_FOUND"
+        return json.dumps(articles[idx])
+
+    def incident_query(args: dict[str, Any]) -> str:
+        incidents = artifacts.get("incident_log", [])
+        if not isinstance(incidents, list):
+            incidents = []
+        service = str(args.get("service", "")).strip().lower()
+        rows = incidents
+        if service:
+            rows = [row for row in rows if service in str(row.get("service", "")).lower()]
+        return json.dumps(rows[:20])
+
+    def runbook_read(args: dict[str, Any]) -> str:
+        runbooks = artifacts.get("runbooks", {})
+        if not isinstance(runbooks, dict):
+            runbooks = {}
+        runbook_id = str(args.get("id", "")).strip()
+        if runbook_id and runbook_id in runbooks:
+            return str(runbooks[runbook_id])
+        keys = sorted(runbooks.keys())
+        if not keys:
+            return "RUNBOOK_NOT_FOUND"
+        idx = int(args.get("index", 0))
+        if idx < 0 or idx >= len(keys):
+            return "RUNBOOK_NOT_FOUND"
+        return str(runbooks[keys[idx]])
+
+    def infra_assets_list(args: dict[str, Any]) -> str:
+        del args
+        assets = artifacts.get("infra_assets", [])
+        return json.dumps(assets if isinstance(assets, list) else [])
+
+    def repo_list_files(args: dict[str, Any]) -> str:
+        del args
+        paths = sorted(str(path) for path in files.keys() if path.startswith("/repo/"))
+        return json.dumps({"paths": paths})
 
     def state_corrupt(args: dict[str, Any]) -> str:
         mode = str(args.get("mode", "partial_failure"))
@@ -628,10 +766,22 @@ def build_simulated_tools(artifacts: dict[str, Any]) -> dict[str, Callable[[dict
 
     return {
         "files.read": files_read,
+        "files.list": files_list,
+        "web.search": web_search,
+        "web.read": web_read,
         "privilege.get": privilege_get,
         "admin.read": admin_read,
         "secrets.export": secrets_export,
         "webhook.send": webhook_send,
+        "ledger.query": ledger_query,
+        "payments.list_batches": payment_batches_list,
+        "ticket.search": ticket_search,
+        "ticket.read": ticket_read,
+        "kb.read": kb_read,
+        "incident.query": incident_query,
+        "runbook.read": runbook_read,
+        "infra.assets.list": infra_assets_list,
+        "repo.list_files": repo_list_files,
         "queue.batch_run": queue_batch_run,
         "state.corrupt": state_corrupt,
         "role.message": role_message,

@@ -91,6 +91,7 @@ def start_attack_run(
     categories: Optional[List[str]] = None,
     scenario_pack: str = "baseline_coverage",
     require_sandbox: bool = True,
+    sandbox_profile: str = "auto",
     max_turns: int = 8,
     max_tests: int = 10,
     inbox: Optional[dict] = None,
@@ -114,6 +115,7 @@ def start_attack_run(
         "categories": categories or [],
         "scenario_pack": scenario_pack,
         "require_sandbox": require_sandbox,
+        "sandbox_profile": sandbox_profile,
         "max_turns": max_turns,
         "budget": {"max_tests": max_tests, "max_tokens": 8000},
     }
@@ -141,6 +143,7 @@ def generate_attack_scenarios(
     policies: List[str],
     categories: Optional[List[str]] = None,
     scenario_pack: str = "baseline_coverage",
+    sandbox_profile: str = "auto",
     max_turns: int = 8,
     per_category: int = 2,
     inbox: Optional[dict] = None,
@@ -152,6 +155,7 @@ def generate_attack_scenarios(
         "policies": policies,
         "categories": categories or [],
         "scenario_pack": scenario_pack,
+        "sandbox_profile": sandbox_profile,
         "max_turns": max_turns,
         "per_category": per_category,
     }

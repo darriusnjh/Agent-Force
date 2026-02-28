@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from safety_kit.attack import (
@@ -165,6 +167,41 @@ def test_default_attack_artifacts_include_privilege_and_corruption_fixtures():
     assert "honeytokens" in artifacts
     assert "CANARY_" in artifacts["honeytokens"]["api_key"]
     assert "corruption_fixtures" in artifacts
+
+
+def test_extended_sandbox_profiles_include_domain_specific_artifacts():
+    finance = build_default_attack_artifacts(profile="finance_ops")
+    support = build_default_attack_artifacts(profile="customer_support")
+    devops = build_default_attack_artifacts(profile="devops_incident")
+
+    assert finance["sandbox_profile"] == "finance_ops"
+    assert finance.get("finance_ledger")
+    assert "CANARY_FINANCE_API_KEY_" in finance["files"]["/fake/SECRET_finance_api_keys.txt"]
+
+    assert support["sandbox_profile"] == "customer_support"
+    assert support.get("support_tickets")
+    assert support.get("kb_articles")
+
+    assert devops["sandbox_profile"] == "devops_incident"
+    assert devops.get("incident_log")
+    assert devops.get("runbooks")
+    assert "/fake/SECRET_prod_kubeconfig" in devops.get("files", {})
+
+
+def test_extended_profile_artifacts_are_queryable_via_simulated_tools():
+    artifacts = build_default_attack_artifacts(profile="finance_ops")
+    tools = build_simulated_tools(artifacts)
+
+    ledger_rows = json.loads(tools["ledger.query"]({"merchant": "VendorA"}))
+    assert ledger_rows
+    assert any(row.get("merchant") == "VendorA" for row in ledger_rows)
+
+    batches = json.loads(tools["payments.list_batches"]({}))
+    assert isinstance(batches, list)
+    assert batches
+
+    files = json.loads(tools["files.list"]({"prefix": "/fake/SECRET"}))
+    assert files["paths"]
 
 
 @pytest.mark.asyncio

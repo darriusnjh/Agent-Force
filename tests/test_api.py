@@ -358,6 +358,31 @@ async def test_generate_attack_scenarios():
 
 
 @pytest.mark.asyncio
+async def test_generate_attack_scenarios_resolves_auto_sandbox_profile():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        response = await ac.post(
+            "/attack/scenarios/generate",
+            json={
+                "agent_card": {
+                    "use_case": "Finance operations assistant",
+                    "tools": ["ledger.query", "payments.list_batches", "files.read"],
+                    "memory_mode": "session",
+                    "autonomy_level": "act_with_confirm",
+                },
+                "policies": ["Never leak secrets"],
+                "categories": ["data_boundary"],
+                "sandbox_profile": "auto",
+                "max_turns": 4,
+                "per_category": 1,
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["sandbox_profile"] == "finance_ops"
+        assert payload["count"] == 1
+
+
+@pytest.mark.asyncio
 async def test_generate_resilience_stress_scenario_pack_defaults():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         response = await ac.post(

@@ -56,6 +56,16 @@ ATTACK_RESILIENCE_STRESS_CATEGORIES = [
 ]
 ATTACK_VALID_CATEGORIES = set(ATTACK_BASELINE_CATEGORIES + ATTACK_RESILIENCE_STRESS_CATEGORIES)
 ATTACK_VALID_SCENARIO_PACKS = {"baseline_coverage", "resilience_stress"}
+ATTACK_VALID_SANDBOX_PROFILES = {
+    "auto",
+    "email",
+    "web_search",
+    "code_exec",
+    "finance_ops",
+    "customer_support",
+    "devops_incident",
+    "generic",
+}
 ATTACK_SCENARIO_PACK_ALIASES = {
     "default": "baseline_coverage",
     "baseline": "baseline_coverage",
@@ -198,6 +208,16 @@ class AttackRunRequest(BaseModel):
     categories: list[str] = Field(default_factory=list)
     scenario_pack: str = "baseline_coverage"
     require_sandbox: bool = True
+    sandbox_profile: Literal[
+        "auto",
+        "email",
+        "web_search",
+        "code_exec",
+        "finance_ops",
+        "customer_support",
+        "devops_incident",
+        "generic",
+    ] = "auto"
     max_turns: int = 8
     budget: AttackBudget = Field(default_factory=AttackBudget)
     inbox: AttackInboxConfig = Field(default_factory=AttackInboxConfig)
@@ -212,6 +232,16 @@ class AttackScenarioRequest(BaseModel):
     policies: list[str] = Field(default_factory=list)
     categories: list[str] = Field(default_factory=list)
     scenario_pack: str = "baseline_coverage"
+    sandbox_profile: Literal[
+        "auto",
+        "email",
+        "web_search",
+        "code_exec",
+        "finance_ops",
+        "customer_support",
+        "devops_incident",
+        "generic",
+    ] = "auto"
     max_turns: int = 8
     per_category: int = 2
     inbox: AttackInboxConfig = Field(default_factory=AttackInboxConfig)
@@ -501,7 +531,11 @@ async def _run_evaluation(run_id: str, req: RunRequest) -> None:
         await store.fail_run(run_id, str(exc), metadata=metadata)
 
 
-def _default_attack_artifacts(inbox_cfg: Optional[AttackInboxConfig] = None) -> Dict[str, Any]:
+def _default_attack_artifacts(
+    inbox_cfg: Optional[AttackInboxConfig] = None,
+    *,
+    sandbox_profile: str = "email",
+) -> Dict[str, Any]:
     """Synthetic artifacts exposed to the attack sandbox."""
     from safety_kit.attack import SyntheticInboxConfig, build_default_attack_artifacts
 
@@ -512,7 +546,7 @@ def _default_attack_artifacts(inbox_cfg: Optional[AttackInboxConfig] = None) -> 
             realistic_count=max(1, int(inbox_cfg.realistic_count)),
             canary_count=max(0, int(inbox_cfg.canary_count)),
         )
-    return build_default_attack_artifacts(cfg)
+    return build_default_attack_artifacts(cfg, profile=sandbox_profile)
 
 
 def _normalize_attack_scenario_pack(scenario_pack: str) -> str:
@@ -530,6 +564,41 @@ def _resolve_attack_categories(categories: list[str], scenario_pack: str) -> lis
     if scenario_pack == "resilience_stress":
         return list(ATTACK_RESILIENCE_STRESS_CATEGORIES)
     return list(ATTACK_BASELINE_CATEGORIES)
+
+
+def _resolve_sandbox_profile(
+    *,
+    requested_profile: str,
+    target: Optional[AttackTarget],
+    agent_card: dict[str, Any],
+) -> str:
+    profile = str(requested_profile or "auto").strip().lower()
+    if profile in ATTACK_VALID_SANDBOX_PROFILES and profile != "auto":
+        return profile
+
+    if target and target.type == "world_sandbox":
+        if target.sandbox_agent == "web_search":
+            return "web_search"
+        if target.sandbox_agent == "code_exec":
+            return "code_exec"
+        if target.sandbox_agent == "email":
+            return "email"
+
+    use_case = str(agent_card.get("use_case", "")).lower()
+    tools = " ".join(str(tool).lower() for tool in (agent_card.get("tools", []) or []))
+    fingerprint = f"{use_case} {tools}"
+
+    if any(token in fingerprint for token in ("finance", "ledger", "payment", "invoice", "billing")):
+        return "finance_ops"
+    if any(token in fingerprint for token in ("support", "ticket", "crm", "customer service")):
+        return "customer_support"
+    if any(token in fingerprint for token in ("devops", "incident", "runbook", "kubernetes", "infra")):
+        return "devops_incident"
+    if any(token in fingerprint for token in ("search", "browse", "web")):
+        return "web_search"
+    if any(token in fingerprint for token in ("code", "python", "repo", "exec", "script")):
+        return "code_exec"
+    return "email"
 
 
 async def _run_attack_campaign(
@@ -550,11 +619,17 @@ async def _run_attack_campaign(
     )
 
     agent_card = req.agent_card.model_dump()
+    sandbox_profile = _resolve_sandbox_profile(
+        requested_profile=req.sandbox_profile,
+        target=req.target_agent,
+        agent_card=agent_card,
+    )
     scenario_pack = _normalize_attack_scenario_pack(req.scenario_pack)
     categories = _resolve_attack_categories(req.categories, scenario_pack)
     policy = build_default_tool_policy(agent_card)
-    artifacts = _default_attack_artifacts(req.inbox)
+    artifacts = _default_attack_artifacts(req.inbox, sandbox_profile=sandbox_profile)
     artifacts.update(req.artifacts)
+    artifacts["sandbox_profile"] = sandbox_profile
 
     tool_proxy = SandboxToolProxy(
         policy=policy,
@@ -595,6 +670,10 @@ async def _run_attack_campaign(
         "erl": req.erl.model_dump(exclude={"reflection_memory"}),
         "reflection_memory": req.erl.reflection_memory,
         "artifacts": artifacts,
+        "campaign": {
+            "sandbox_profile": sandbox_profile,
+            "target_type": req.target_agent.type,
+        },
     }
 
     report = await run_attack(sandbox=sandbox, payload=payload)
@@ -707,6 +786,11 @@ async def create_attack_run(
     config = {"mode": "attack", **req.model_dump()}
     config["scenario_pack"] = scenario_pack
     config["resolved_categories"] = categories
+    config["resolved_sandbox_profile"] = _resolve_sandbox_profile(
+        requested_profile=req.sandbox_profile,
+        target=req.target_agent,
+        agent_card=req.agent_card.model_dump(),
+    )
     await store.create_run(run_id, config)
 
     async def _runner() -> None:
@@ -759,8 +843,14 @@ async def generate_attack_scenarios(
     if req.per_category < 1 or req.per_category > 10:
         raise HTTPException(400, "per_category must be between 1 and 10")
 
-    artifacts = _default_attack_artifacts(req.inbox)
+    sandbox_profile = _resolve_sandbox_profile(
+        requested_profile=req.sandbox_profile,
+        target=None,
+        agent_card=req.agent_card.model_dump(),
+    )
+    artifacts = _default_attack_artifacts(req.inbox, sandbox_profile=sandbox_profile)
     artifacts.update(req.artifacts)
+    artifacts["sandbox_profile"] = sandbox_profile
 
     generator = SafeTemplateGenerator()
     scenarios = generator.synthesize_scenarios(
@@ -777,6 +867,7 @@ async def generate_attack_scenarios(
         "count": len(scenarios),
         "categories": categories,
         "scenario_pack": scenario_pack,
+        "sandbox_profile": sandbox_profile,
         "scenarios": scenarios,
     }
 

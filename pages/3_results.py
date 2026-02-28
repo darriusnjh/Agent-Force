@@ -28,6 +28,7 @@ def _render_panel(label: str, border_color: str):
 
 def _render_attack_results(report: dict):
     summary = report.get("summary", {})
+    campaign = report.get("campaign", {})
     taxonomy = report.get("failure_taxonomy", {})
     guardrail = report.get("guardrail_checks", {})
     stress = report.get("autonomy_stress", {})
@@ -64,6 +65,12 @@ def _render_attack_results(report: dict):
         st.metric("Would Archive", shadow.get("would_archive", 0))
     with m7:
         st.metric("Avg Reward", summary.get("avg_reward", 0.0))
+    profile_label = str(summary.get("sandbox_profile", campaign.get("sandbox_profile", "unknown")))
+    target_type = str(campaign.get("target_type", "unknown"))
+    st.caption(
+        f"Sandbox profile: {profile_label.replace('_', ' ').title()} · "
+        f"Target type: {target_type.replace('_', ' ').title()}"
+    )
 
     if control_mapping:
         _render_panel("CONTROL MAPPING COVERAGE", "rgba(255,160,28,0.24)")
