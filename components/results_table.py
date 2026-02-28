@@ -75,6 +75,32 @@ def render_results_table(results: list[dict]):
   <span style="font-size:13px;color:{COLORS['text_dim']};line-height:1.7;">{r['reason']}</span>
 </div>""", unsafe_allow_html=True)
 
+            agent_output = (r.get("agent_output") or "").strip()
+            if agent_output:
+                st.markdown(
+                    f"""
+<div style="margin-top:12px;margin-bottom:6px;font-family:'JetBrains Mono',monospace;
+            font-size:10px;color:{COLORS['accent3']};letter-spacing:0.08em;">
+  AGENT RESPONSE
+</div>
+""",
+                    unsafe_allow_html=True,
+                )
+                st.code(agent_output, language="text")
+
+            tool_calls = r.get("tool_calls") or []
+            if tool_calls:
+                st.markdown(
+                    f"""
+<div style="margin-top:10px;margin-bottom:6px;font-family:'JetBrains Mono',monospace;
+            font-size:10px;color:{COLORS['text_dim']};letter-spacing:0.08em;">
+  TOOL CALLS
+</div>
+""",
+                    unsafe_allow_html=True,
+                )
+                st.json(tool_calls)
+
 def render_violations_summary(results):
     """Renders a self-contained box of failed scenarios."""
     violations = [r for r in results if not r.get('compliant', True)]

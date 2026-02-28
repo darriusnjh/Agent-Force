@@ -1,8 +1,29 @@
 # ── components/sidebar.py ─────────────────────────────────────────────────────
 
+import json
+import shlex
+
 import streamlit as st
 from config import COLORS
 from components.metric_cards import pulsing_dot_html
+
+
+def _parse_json_dict(raw: str, label: str) -> dict[str, str]:
+    text = (raw or "").strip()
+    if not text:
+        return {}
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        st.error(f"{label} must be valid JSON: {exc}")
+        return {}
+    if not isinstance(data, dict):
+        st.error(f"{label} must be a JSON object.")
+        return {}
+    out: dict[str, str] = {}
+    for key, value in data.items():
+        out[str(key)] = str(value)
+    return out
 
 
 def render_sidebar(backend_alive: bool = False) -> dict:
@@ -43,8 +64,8 @@ def render_sidebar(backend_alive: bool = False) -> dict:
         # ── Agent selection ───────────────────────────────────────────────────
         agent = st.selectbox(
             "Agent Under Test",
-            ["email", "web_search", "code_exec", "custom"],
-            help="Select which pre-built agent to evaluate",
+            ["email", "web_search", "code_exec", "jira", "custom"],
+            help="Select a built-in agent or provide custom runtime configuration.",
         )
 
         agent_model = st.selectbox(
@@ -61,6 +82,95 @@ def render_sidebar(backend_alive: bool = False) -> dict:
              "anthropic/claude-3-5-sonnet", "groq/llama-3.1-70b-versatile"],
             help="High-capability model acting as legal compliance judge",
         )
+
+        custom_agent = None
+        custom_agent_error = None
+        if agent == "custom":
+            st.markdown("<hr/>", unsafe_allow_html=True)
+            st.markdown(f"""
+<div style="font-family:'Space Mono',monospace;font-size:9px;color:{COLORS['text_dim']};
+            letter-spacing:0.12em;text-transform:uppercase;margin-bottom:10px;">
+  CUSTOM AGENT PLUG-IN
+</div>""", unsafe_allow_html=True)
+
+            custom_mode = st.selectbox(
+                "Custom Agent Type",
+                ["http", "mcp"],
+                help="HTTP: call your running agent endpoint. MCP: launch an MCP server directly.",
+            )
+            custom_name = st.text_input("Custom Agent Name", value="Custom Agent")
+            custom_dataset = st.selectbox(
+                "Safety Dataset",
+                ["email", "web_search", "code_exec", "jira"],
+                help="Pick the scenario set used for evaluating your custom agent.",
+            )
+            fail_on_mutating = st.toggle(
+                "Mark Mutating Tool Calls as Breach",
+                value=True,
+                help="When enabled, mutating tool calls are forced to UNSAFE in scoring.",
+            )
+            read_only = st.toggle(
+                "Read-only Runtime Guard",
+                value=True,
+                help="When enabled, MCPAgent blocks mutating tools at runtime.",
+            )
+
+            if custom_mode == "http":
+                endpoint_url = st.text_input("HTTP Endpoint URL", value="http://localhost:9000/invoke")
+                timeout_seconds = st.slider("HTTP Timeout (seconds)", 5, 180, 30)
+                headers_json = st.text_area(
+                    "HTTP Headers (JSON object)",
+                    value='{"Authorization":"Bearer <token>"}',
+                    height=70,
+                )
+                headers = _parse_json_dict(headers_json, "HTTP Headers")
+                if not endpoint_url.strip():
+                    custom_agent_error = "Custom HTTP endpoint URL is required."
+
+                custom_agent = {
+                    "mode": "http",
+                    "name": custom_name.strip() or "Custom Agent",
+                    "dataset": custom_dataset,
+                    "fail_on_mutating_tools": fail_on_mutating,
+                    "read_only": read_only,
+                    "endpoint_url": endpoint_url.strip(),
+                    "timeout_seconds": float(timeout_seconds),
+                    "headers": headers,
+                }
+            else:
+                command = st.text_input("MCP Command", value="uvx")
+                args_text = st.text_area(
+                    "MCP Args (shell-style)",
+                    value="mcp-atlassian --jira-url https://your-org.atlassian.net --jira-username you@example.com --jira-token <token>",
+                    height=80,
+                )
+                env_json = st.text_area("MCP Env (JSON object)", value="{}", height=70)
+                system_prompt = st.text_area("Custom System Prompt (optional)", value="", height=80)
+                max_turns = st.slider("Max Agent Turns", 1, 20, 10)
+
+                args = shlex.split(args_text.strip()) if args_text.strip() else []
+                env = _parse_json_dict(env_json, "MCP Env")
+
+                if not command.strip():
+                    custom_agent_error = "MCP command is required."
+                elif not args:
+                    custom_agent_error = "MCP args are required."
+
+                custom_agent = {
+                    "mode": "mcp",
+                    "name": custom_name.strip() or "Custom Agent",
+                    "dataset": custom_dataset,
+                    "fail_on_mutating_tools": fail_on_mutating,
+                    "read_only": read_only,
+                    "command": command.strip(),
+                    "args": args,
+                    "env": env,
+                    "system_prompt": system_prompt.strip() or None,
+                    "max_turns": int(max_turns),
+                }
+
+            if custom_agent_error:
+                st.error(custom_agent_error)
 
         st.markdown("<hr/>", unsafe_allow_html=True)
 
@@ -149,4 +259,6 @@ def render_sidebar(backend_alive: bool = False) -> dict:
         "epochs": epochs,
         "max_rounds": max_rounds,
         "samples_per_round": samples_per_round,
+        "custom_agent": custom_agent,
+        "custom_agent_error": custom_agent_error,
     }

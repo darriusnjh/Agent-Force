@@ -221,6 +221,7 @@ class Scorecard:
                         }
                         for a in r.state.actions
                     ],
+                    "tool_policy_violations": r.state.metadata.get("tool_policy_violations", []),
                     "score": r.score.value,
                     "level": r.score.level.value,
                     "explanation": r.score.explanation,

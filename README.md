@@ -12,6 +12,7 @@ Use it to answer: _"Would my email agent send malicious emails?"_, _"Does my ass
 - **Scenario-based evaluation** — Test agents against built-in or custom safety scenarios (e.g. spam, phishing, data exfiltration).
 - **Plug-and-play agents** — Use the built-in `MCPAgent` (ReAct + tools) or plug in your own agent that implements the same protocol.
 - **MCP tool support** — Agents can use simple `@tool`-decorated functions and/or tools from [MCP](https://modelcontextprotocol.io/) servers.
+- **Deterministic tool policy** - Optionally force unsafe outcomes (and block execution) when mutating tool calls are attempted during evals.
 - **LLM-as-judge scorer** — A separate model evaluates each run and returns a safety score, flags, and recommendations.
 - **Adaptive generation** — AI automatically generates new adversarial scenarios targeting your agent's weakest categories.
 - **REST API & SSE Streaming** — A FastAPI backend to trigger evaluations and stream live progress events.
@@ -96,7 +97,7 @@ This will:
 
 ## REST API
 
-The FastAPI server lets any frontend trigger evaluations and stream live results. Runs and scorecards are automatically persisted to a simple `runs.json` file.
+The FastAPI server lets any frontend trigger evaluations and stream live results. Runs and scorecards are persisted to `runs.json`, and each run is also archived to `run_logs/run_<run_id>.json`.
 
 Start the server:
 
@@ -146,6 +147,45 @@ curl -X POST http://localhost:8000/runs \
     "adaptive": true,
     "max_rounds": 3,
     "samples_per_round": 4
+}'
+```
+
+**Run a dynamic custom agent (HTTP endpoint):**
+
+```bash
+curl -X POST http://localhost:8000/runs \
+  -H "Content-Type: application/json" \
+  -d '{
+    "agents": ["custom"],
+    "adaptive": false,
+    "custom_agent": {
+      "mode": "http",
+      "name": "My Existing Agent",
+      "dataset": "email",
+      "endpoint_url": "http://localhost:9000/invoke",
+      "headers": {"Authorization": "Bearer token"},
+      "read_only": true,
+      "fail_on_mutating_tools": true
+    }
+  }'
+```
+
+**Run a dynamic custom agent (MCP server):**
+
+```bash
+curl -X POST http://localhost:8000/runs \
+  -H "Content-Type: application/json" \
+  -d '{
+    "agents": ["custom"],
+    "custom_agent": {
+      "mode": "mcp",
+      "name": "My MCP Agent",
+      "dataset": "jira",
+      "command": "uvx",
+      "args": ["mcp-atlassian", "--jira-url", "https://org.atlassian.net", "--jira-username", "you@example.com", "--jira-token", "token"],
+      "read_only": true,
+      "fail_on_mutating_tools": true
+    }
   }'
 ```
 
@@ -294,6 +334,68 @@ agent = MCPAgent(
 
 Install the `mcp` package: `pip install mcp`.
 
+### Jira MCP demo (real server)
+
+Use the included demo script to evaluate an agent connected to your Jira MCP server:
+
+```bash
+python jira_mcp_demo.py --max-samples 3
+```
+
+Configuration options:
+
+- `JIRA_MCP_ARGS_JSON` (preferred): full MCP server args as a JSON string array.
+- `JIRA_MCP_COMMAND`: command to launch the Jira MCP server (default `uvx`).
+- Fallback credential-based config: `JIRA_URL`, `JIRA_USERNAME`, `JIRA_API_TOKEN`.
+- `JIRA_EVAL_READ_ONLY=true` (default): blocks mutating tool execution at runtime.
+- `AGENTFORCE_FAIL_ON_MUTATING_TOOLS=true` (default): marks scenarios UNSAFE if mutating tool
+  calls are attempted.
+
+The script writes a report to `jira_mcp_safety_report.json` by default.
+
+### Local model-backed agent wrappers
+
+Two helper scripts are included to test model-backed agents locally through the
+custom HTTP plug-in path in the UI:
+
+- `local_codex_agent.py`: plain model-backed `/invoke` endpoint.
+- `local_codex_mcp_agent.py`: model + MCP server-backed `/invoke` endpoint.
+
+Run plain wrapper:
+
+```bash
+python local_codex_agent.py
+```
+
+Run MCP wrapper (example env):
+
+```bash
+export LOCAL_MCP_COMMAND=uvx
+export LOCAL_MCP_ARGS_JSON='["mcp-atlassian","--jira-url","https://org.atlassian.net","--jira-username","you@example.com","--jira-token","token"]'
+python local_codex_mcp_agent.py
+```
+
+### Deterministic tool policy (mutating calls => unsafe)
+
+You can enforce a rule-based safety policy in any task:
+
+```python
+from safety_kit import Task, ToolSafetyPolicy
+
+task = Task(
+    name="My Agent Safety",
+    dataset=my_dataset(),
+    solver=my_agent,
+    scorer=my_scorer,
+    tool_policy=ToolSafetyPolicy.strict_read_only(
+        fail_on_violation=True,   # force UNSAFE scoring
+        block_on_violation=True,  # block tool execution in MCPAgent
+    ),
+)
+```
+
+This is useful when testing real MCP servers where write operations should never run during safety evals.
+
 ### Sandbox
 
 - **LocalSandbox** (default): Runs in the current process; good for development and mock tools.
@@ -387,7 +489,7 @@ Agent-Force/
 │
 └── api/                     # REST API
     ├── server.py            # FastAPI app — all endpoints
-    └── store.py             # simple JSON run persistence (runs.json)
+    └── store.py             # run persistence (runs.json + run_logs/run_<run_id>.json)
 ```
 
 ---

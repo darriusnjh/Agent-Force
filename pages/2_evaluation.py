@@ -19,7 +19,7 @@ config = render_sidebar(backend_alive=alive)
 render_page_header("Run Evaluation", "Evaluation",
                    (COLORS["accent2"], COLORS["accent3"]))
 
-scenarios = get_scenarios()
+scenarios = get_scenarios(config.get("agent", "email"), config.get("custom_agent"))
 col_main, col_info = st.columns([2, 1])
 
 with col_info:
@@ -83,21 +83,87 @@ with col_main:
   </div>""", unsafe_allow_html=True)
 
         if alive:
-            run_id = start_run(
-                agents=[config["agent"]],
-                adaptive=config["adaptive"] or adaptive_run,
-                agent_model=config["agent_model"],
-                scorer_model=config["scorer_model"],
-            )
+            if config.get("agent") == "custom" and config.get("custom_agent_error"):
+                st.error(config["custom_agent_error"])
+                st.stop()
+
+            try:
+                run_id = start_run(
+                    agents=[config["agent"]],
+                    adaptive=config["adaptive"] or adaptive_run,
+                    agent_model=config["agent_model"],
+                    scorer_model=config["scorer_model"],
+                    epochs=config["epochs"],
+                    max_rounds=config["max_rounds"],
+                    samples_per_round=config["samples_per_round"],
+                    custom_agent=config.get("custom_agent"),
+                )
+            except Exception as exc:
+                st.error(f"Failed to start run: {exc}")
+                st.stop()
+
             if run_id:
                 st.session_state["last_run_id"] = run_id
                 from api_client import stream_run
                 prog = st.progress(0)
                 log_lines, log_ph = [], st.empty()
-                for i, event in enumerate(stream_run(run_id)):
-                    log_lines.append(str(event))
-                    prog.progress(min(int((i / len(scenarios)) * 100), 99))
-                    with log_ph.container(): render_live_log(log_lines)
+                processed = 0
+                total_expected = max(1, len(scenarios))
+                for event in stream_run(run_id):
+                    event_type = event.get("type")
+
+                    if event_type == "tool_call":
+                        sample_idx = event.get("sample_index", "?")
+                        total_samples = event.get("total_samples", "?")
+                        log_lines.append(
+                            f"[{event.get('agent', config['agent'])}] "
+                            f"tool sample {sample_idx}/{total_samples}: "
+                            f"{event.get('tool_name', 'unknown_tool')}"
+                        )
+                        tool_input = event.get("tool_input")
+                        if tool_input:
+                            log_lines.append(f"tool_input> {str(tool_input)[:220]}")
+                        tool_output = str(event.get("tool_output", "")).strip()
+                        if tool_output:
+                            log_lines.append(f"tool_output> {tool_output[:220]}")
+                    elif event_type == "sample_result":
+                        processed = int(event.get("sample_index", processed + 1))
+                        total_expected = max(int(event.get("total_samples", total_expected)), 1)
+                        category = event.get("category", "general")
+                        level = event.get("level", "unknown")
+                        score = float(event.get("score", 0.0))
+                        log_lines.append(
+                            f"[{event.get('agent', config['agent'])}] "
+                            f"sample {processed}/{total_expected} "
+                            f"{category} -> {level} ({score:.2f})"
+                        )
+
+                        agent_output = str(event.get("agent_output", "")).strip()
+                        if agent_output:
+                            log_lines.append(f"agent> {agent_output[:220]}")
+
+                        judge = str(event.get("judge_explanation", "")).strip()
+                        if judge:
+                            log_lines.append(f"judge> {judge[:220]}")
+
+                        prog.progress(min(int((processed / total_expected) * 100), 99))
+                    elif event_type == "agent_complete":
+                        log_lines.append(
+                            f"[{event.get('agent', config['agent'])}] complete "
+                            f"score={float(event.get('score', 0.0)):.2f} "
+                            f"level={event.get('level', 'unknown')}"
+                        )
+                    elif event_type == "agent_error":
+                        log_lines.append(
+                            f"[{event.get('agent', config['agent'])}] error: {event.get('error', 'unknown')}"
+                        )
+                    elif event_type == "done":
+                        log_lines.append("Run finished.")
+                    else:
+                        log_lines.append(str(event))
+
+                    with log_ph.container():
+                        render_live_log(log_lines)
                 prog.progress(100)
                 st.success("Evaluation complete — navigate to Results to view scorecard.")
             else:

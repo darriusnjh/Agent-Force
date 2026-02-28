@@ -10,7 +10,7 @@ st.set_page_config(
     page_title="Agent-Force · AI Governance",
     page_icon="🛡️",
     layout="wide",
-    initial_sidebar_state="collapsed",
+    initial_sidebar_state="expanded",
 )
 
 # 2. Inject the Top Navigation CSS
@@ -20,9 +20,7 @@ st.markdown(f"""
 /* Hide Streamlit chrome and default sidebar to use our custom nav */
 #MainMenu, footer, header,
 [data-testid="stHeader"],
-[data-testid="stSidebar"],
-[data-testid="stSidebarNav"],
-[data-testid="collapsedControl"] {{ display:none !important; }}
+[data-testid="stSidebarNav"] { display:none !important; }
 
 /* Layout Fixes for Gap */
 .block-container {{ 
