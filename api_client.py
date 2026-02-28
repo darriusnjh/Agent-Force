@@ -7,22 +7,43 @@ from config import API_BASE_URL
 # ── API Connection ────────────────────────────────────────────────────────────
 
 def is_backend_alive() -> bool:
+    """Checks if the FastAPI backend is running via the GET /health endpoint."""
     try:
         response = requests.get(f"{API_BASE_URL}/health", timeout=2)
         return response.status_code == 200
     except requests.exceptions.RequestException:
         return False
 
-def start_run(agents: list[str], adaptive: bool = False, agent_model: str = None, scorer_model: str = None) -> str:
-    payload = {"agents": agents, "adaptive": adaptive}
+def start_run(
+    agents: list[str], 
+    adaptive: bool = False, 
+    agent_model: str = None, 
+    scorer_model: str = None,
+    adaptive_model: str = None,
+    samples_per_round: int = 4,
+    max_rounds: int = 3
+) -> str:
+    """Triggers a new evaluation run via POST /runs and returns the run_id."""
+    payload = {
+        "agents": agents,
+        "adaptive": adaptive,
+        "samples_per_round": samples_per_round,
+        "max_rounds": max_rounds
+    }
+    
+    # Only attach models if they are provided (backend allows nulls)
     if agent_model: payload["agent_model"] = agent_model
     if scorer_model: payload["scorer_model"] = scorer_model
+    if adaptive_model: payload["adaptive_model"] = adaptive_model
 
     response = requests.post(f"{API_BASE_URL}/runs", json=payload)
     response.raise_for_status()
+    
+    # The API returns a RunCreated schema: {"run_id": "...", "status": "running"}
     return response.json()["run_id"]
 
 def stream_run(run_id: str) -> Generator[dict, None, None]:
+    """Connects to GET /runs/{run_id}/stream (SSE) and yields live events."""
     url = f"{API_BASE_URL}/runs/{run_id}/stream"
     with requests.get(url, stream=True) as response:
         response.raise_for_status()
@@ -38,12 +59,18 @@ def stream_run(run_id: str) -> Generator[dict, None, None]:
 # ── Dashboard Data Fetchers ───────────────────────────────────────────────────
 
 def _get_run_data(run_id: str = None):
+    """Helper to fetch GET /runs/{run_id} or GET /runs to find the latest."""
     if not is_backend_alive():
         return None
     try:
         if run_id:
-            return requests.get(f"{API_BASE_URL}/runs/{run_id}").json()
+            # Get specific run
+            response = requests.get(f"{API_BASE_URL}/runs/{run_id}")
+            if response.status_code == 200:
+                return response.json()
+            return None
         else:
+            # Get latest run by fetching the list and grabbing the last one
             runs = requests.get(f"{API_BASE_URL}/runs").json()
             if not runs:
                 return None
@@ -54,8 +81,7 @@ def _get_run_data(run_id: str = None):
 
 def get_results(run_id: str = None) -> list[dict]:
     run_data = _get_run_data(run_id)
-    if not run_data:
-        return MOCK_RESULTS 
+    if not run_data: return MOCK_RESULTS 
     
     try:
         agent_scorecard = run_data["results"][0]["scorecard"]
@@ -65,7 +91,7 @@ def get_results(run_id: str = None) -> list[dict]:
                 "id": f"S-{i+1:02d}",
                 "name": res["input"][:50] + "...",
                 "framework": res["category"],
-                "article": "General",  # <--- Added this fallback to prevent the KeyError
+                "article": "General", 
                 "score": int(res["score"] * 100),
                 "compliant": res["level"] == "safe",
                 "severity": res.get("severity", "medium").lower(),
@@ -97,7 +123,7 @@ def get_recommendations(run_id: str = None) -> list[dict]:
         recs = []
         for i, rec in enumerate(agent_scorecard["all_recommendations"]):
             recs.append({
-                "action": rec, # Fixed: Changed from "title" to "action"
+                "action": rec,
                 "framework": "System",
                 "priority": f"P{i % 4}",
                 "effort": "1 week"
