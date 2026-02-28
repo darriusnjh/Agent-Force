@@ -6,8 +6,8 @@ import streamlit as st
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from api_client import get_attack_report, get_radar_data, get_results, is_backend_alive
-from components.charts import donut_chart, scores_bar_chart, waterfall_chart
+from api_client import get_attack_report, get_results, is_backend_alive
+from components.charts import donut_chart, scores_bar_chart
 from components.results_table import render_result_cards, render_results_table, render_violations_summary
 from components.sidebar import render_sidebar
 from components.topnav import render_page_header, render_topnav
@@ -174,14 +174,11 @@ if attack_report:
     _render_attack_results(attack_report)
 else:
     results = get_results(run_id)
-    radar = get_radar_data()
 
-    f1, f2, f3 = st.columns([1, 1, 2])
+    f1, f2 = st.columns([1, 2])
     with f1:
         filter_status = st.selectbox("Status", ["All", "Violations Only", "Compliant Only"])
     with f2:
-        filter_fw = st.selectbox("Framework", ["All"] + list({r["framework"] for r in results}))
-    with f3:
         filter_sev = st.multiselect(
             "Severity",
             ["critical", "high", "medium", "low"],
@@ -193,8 +190,6 @@ else:
         filtered = [r for r in filtered if not r["compliant"]]
     elif filter_status == "Compliant Only":
         filtered = [r for r in filtered if r["compliant"]]
-    if filter_fw != "All":
-        filtered = [r for r in filtered if r["framework"] == filter_fw]
     if filter_sev:
         filtered = [r for r in filtered if r["severity"] in filter_sev]
 
@@ -220,10 +215,6 @@ else:
         _render_panel("PASS / FAIL BREAKDOWN", "rgba(0,255,178,0.18)")
         donut_chart(filtered, key="res_donut")
         st.markdown("</div>", unsafe_allow_html=True)
-
-    _render_panel("FRAMEWORK DELTA VS 75% BASELINE", "rgba(123,97,255,0.18)")
-    waterfall_chart(radar, key="res_waterfall")
-    st.markdown("</div>", unsafe_allow_html=True)
 
     st.markdown(
         f"""<div style="background:{COLORS['panel']};border:1px solid rgba(255,59,92,0.22);

@@ -4,7 +4,7 @@ import streamlit as st
 from config import COLORS, score_color
 from components.metric_cards import (
     badge_html, score_ring_html, compliant_badge,
-    framework_badge, severity_badge, section_label
+    severity_badge, section_label
 )
 
 
@@ -27,7 +27,6 @@ def render_result_cards(results: list[dict]):
     {score_ring_html(r['score'], size=50, stroke=5)}
   </div>
   <div style="display:flex;gap:6px;flex-wrap:wrap;">
-    {framework_badge(r['framework'])}
     {compliant_badge(r['compliant'])}
   </div>
 </div>""", unsafe_allow_html=True)
@@ -46,25 +45,24 @@ def render_results_table(results: list[dict]):
             f"{r['id']} — {r['name']}  |  Score: {r['score']}%  |  {'✓ COMPLIANT' if r['compliant'] else '✗ VIOLATION'}",
             expanded=not r["compliant"],
         ):
-            col1, col2, col3, col4, col5 = st.columns([1, 1.5, 1.2, 1.2, 1])
+            col1, col2, col3, col4 = st.columns([1, 2.2, 1.2, 1])
             with col1:
                 st.markdown(score_ring_html(r["score"], size=64, stroke=6),
                             unsafe_allow_html=True)
             with col2:
                 st.markdown(f"""
 <div style="font-size:13px;color:{COLORS['text']};font-weight:600;margin-bottom:8px;">{r['name']}</div>
-{framework_badge(r['framework'])}
 """, unsafe_allow_html=True)
             with col3:
                 st.markdown(f"""
 <div style="font-family:'Space Mono',monospace;font-size:9px;color:{COLORS['text_dim']};
             letter-spacing:0.1em;margin-bottom:6px;">ARTICLE</div>
 <div style="font-family:'JetBrains Mono',monospace;font-size:14px;
-            color:{COLORS['accent2']};font-weight:700;">{r['article']}</div>
+            color:{COLORS['accent2']};font-weight:700;">{r.get('article', '-')}</div>
 """, unsafe_allow_html=True)
             with col4:
                 st.markdown(f"{severity_badge(r['severity'])}", unsafe_allow_html=True)
-            with col5:
+                st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
                 st.markdown(compliant_badge(r["compliant"]), unsafe_allow_html=True)
 
             st.markdown(f"""
