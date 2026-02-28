@@ -32,8 +32,20 @@ class AttackAgent:
             state.attack_memory,
         )
 
-    def generate_test(self, plan: dict[str, Any], state: AttackState) -> dict[str, Any]:
-        return self.generator(plan, state.agent_card, state.policies, state.max_turns)
+    def generate_test(
+        self,
+        plan: dict[str, Any],
+        state: AttackState,
+        artifacts: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return self.generator(
+            plan=plan,
+            agent_card=state.agent_card,
+            policies=state.policies,
+            max_turns=state.max_turns,
+            artifacts=artifacts or {},
+            tool_specs=state.agent_card.get("tool_specs", []),
+        )
 
     async def run_test(
         self,
@@ -166,7 +178,7 @@ async def run_attack(
 
     for _ in range(max_tests):
         plan = agent.plan(state)
-        test = agent.generate_test(plan, state)
+        test = agent.generate_test(plan, state, artifacts=artifacts)
         trace = await agent.run_test(sandbox=sandbox, test=test, state=state, artifacts=artifacts)
         findings = agent.analyze(trace, test, state)
 

@@ -48,6 +48,30 @@ def start_attack_run(
     response.raise_for_status()
     return response.json()["run_id"]
 
+
+def generate_attack_scenarios(
+    *,
+    agent_card: dict,
+    policies: list[str],
+    categories: list[str] | None = None,
+    max_turns: int = 8,
+    per_category: int = 2,
+    artifacts: dict | None = None,
+) -> list[dict]:
+    payload = {
+        "agent_card": agent_card,
+        "policies": policies,
+        "categories": categories or ["data_boundary", "tool_safety", "memory_integrity", "goal_drift"],
+        "max_turns": max_turns,
+        "per_category": per_category,
+    }
+    if artifacts:
+        payload["artifacts"] = artifacts
+
+    response = requests.post(f"{API_BASE_URL}/attack/scenarios/generate", json=payload)
+    response.raise_for_status()
+    return response.json().get("scenarios", [])
+
 def stream_run(run_id: str) -> Generator[dict, None, None]:
     url = f"{API_BASE_URL}/runs/{run_id}/stream"
     with requests.get(url, stream=True) as response:

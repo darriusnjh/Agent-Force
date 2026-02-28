@@ -2,6 +2,8 @@
 
 Endpoints:
     POST /runs                  → start a new evaluation run (returns run_id)
+    POST /attack/runs           → start a defensive attack/test run
+    POST /attack/scenarios/generate → generate contextualized test scenarios
     GET  /runs                  → list all past runs
     GET  /runs/{run_id}         → full scorecard JSON for a run
     GET  /runs/{run_id}/stream  → SSE stream of live progress events
@@ -113,6 +115,7 @@ class AgentCard(BaseModel):
 
     use_case: str = "General assistant"
     tools: list[str] = Field(default_factory=list)
+    tool_specs: list[dict[str, Any]] = Field(default_factory=list)
     memory_mode: Literal["session", "persistent", "none"] = "session"
     autonomy_level: Literal["suggest", "act_with_confirm", "act"] = "suggest"
 
@@ -133,6 +136,19 @@ class AttackRunRequest(BaseModel):
     )
     max_turns: int = 8
     budget: AttackBudget = Field(default_factory=AttackBudget)
+    artifacts: dict[str, Any] = Field(default_factory=dict)
+
+
+class AttackScenarioRequest(BaseModel):
+    """Request model for dynamic scenario generation preview."""
+
+    agent_card: AgentCard
+    policies: list[str] = Field(default_factory=list)
+    categories: list[str] = Field(
+        default_factory=lambda: ["data_boundary", "tool_safety", "memory_integrity", "goal_drift"]
+    )
+    max_turns: int = 8
+    per_category: int = 2
     artifacts: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -422,6 +438,40 @@ async def create_attack_run(req: AttackRunRequest) -> RunCreated:
 
     asyncio.create_task(_runner())
     return RunCreated(run_id=run_id)
+
+
+@app.post("/attack/scenarios/generate")
+async def generate_attack_scenarios(req: AttackScenarioRequest) -> dict[str, Any]:
+    """Generate contextualized defensive test scenarios from agent metadata."""
+    from safety_kit.attack import SafeTemplateGenerator
+
+    valid_categories = {"data_boundary", "tool_safety", "memory_integrity", "goal_drift"}
+    bad = [cat for cat in req.categories if cat not in valid_categories]
+    if bad:
+        raise HTTPException(400, f"Unknown category(ies): {bad}. Valid: {sorted(valid_categories)}")
+    if req.max_turns < 1 or req.max_turns > 20:
+        raise HTTPException(400, "max_turns must be between 1 and 20")
+    if req.per_category < 1 or req.per_category > 10:
+        raise HTTPException(400, "per_category must be between 1 and 10")
+
+    artifacts = _default_attack_artifacts()
+    artifacts.update(req.artifacts)
+
+    generator = SafeTemplateGenerator()
+    scenarios = generator.synthesize_scenarios(
+        agent_card=req.agent_card.model_dump(),
+        policies=req.policies,
+        categories=req.categories,
+        max_turns=req.max_turns,
+        artifacts=artifacts,
+        tool_specs=req.agent_card.tool_specs,
+        per_category=req.per_category,
+    )
+    return {
+        "count": len(scenarios),
+        "categories": req.categories,
+        "scenarios": scenarios,
+    }
 
 
 @app.get("/runs")
