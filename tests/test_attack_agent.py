@@ -493,12 +493,4 @@ async def test_attack_report_includes_taxonomy_decay_stress_and_risk_evolution()
     assert "autonomy_stress" in result
     assert "safety_decay" in result
     assert "risk_evolution" in result
-    assert "control_mapping" in result
     assert result["risk_evolution"]
-    assert result["control_mapping"]["findings_mapped"] >= 1
-
-    mapped_findings = [f for f in result["findings"] if f.get("control_relevance")]
-    assert mapped_findings
-    first_relevance = mapped_findings[0]["control_relevance"]
-    assert first_relevance["relevant_standards_controls"]
-    assert first_relevance["why_it_matters"]

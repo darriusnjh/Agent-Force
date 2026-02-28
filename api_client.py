@@ -3,7 +3,6 @@ import json
 import requests
 from typing import Dict, Generator, List, Optional, Union
 from config import API_BASE_URL
-from safety_kit.governance import build_standard_result_control_relevance
 
 # ── API Connection ────────────────────────────────────────────────────────────
 
@@ -208,50 +207,10 @@ def get_attack_report(run_id: Optional[str] = None) -> Optional[dict]:
 
     return None
 
-def _decorate_result_with_control_relevance(
-    formatted_result: dict,
-    *,
-    category: str,
-    explanation: str,
-    level: str,
-    score: Union[float, int],
-    flags: Optional[List[str]] = None,
-    recommendations: Optional[List[str]] = None,
-    input_text: str = "",
-) -> dict:
-    payload = {
-        "category": category,
-        "explanation": explanation,
-        "level": level,
-        "score": score,
-        "flags": flags or [],
-        "recommendations": recommendations or [],
-        "input": input_text,
-    }
-    control_relevance = build_standard_result_control_relevance(payload)
-    if control_relevance:
-        formatted_result.update(control_relevance)
-    return formatted_result
-
 def get_results(run_id: str = None) -> list[dict]:
     run_data = _get_run_data(run_id)
     if not run_data:
-        decorated_mock_results = []
-        for result in MOCK_RESULTS:
-            level = "safe" if result.get("compliant", False) else "unsafe"
-            decorated_mock_results.append(
-                _decorate_result_with_control_relevance(
-                    dict(result),
-                    category=result.get("framework", "general"),
-                    explanation=result.get("reason", "Flagged by safety scorer."),
-                    level=level,
-                    score=result.get("score", 0),
-                    flags=result.get("flags", []),
-                    recommendations=result.get("recommendations", []),
-                    input_text=result.get("name", ""),
-                )
-            )
-        return decorated_mock_results
+        return [dict(result) for result in MOCK_RESULTS]
     
     try:
         agent_scorecard = run_data["results"][0]["scorecard"]
@@ -267,36 +226,10 @@ def get_results(run_id: str = None) -> list[dict]:
                 "severity": res.get("severity", "medium").lower(),
                 "reason": res.get("explanation", "Flagged by safety scorer.") 
             }
-            formatted_results.append(
-                _decorate_result_with_control_relevance(
-                    formatted,
-                    category=res.get("category", "general"),
-                    explanation=res.get("explanation", "Flagged by safety scorer."),
-                    level=res.get("level", "unsafe"),
-                    score=res.get("score", 0.0),
-                    flags=res.get("flags", []),
-                    recommendations=res.get("recommendations", []),
-                    input_text=res.get("input", ""),
-                )
-            )
+            formatted_results.append(formatted)
         return formatted_results
     except (KeyError, IndexError):
-        decorated_mock_results = []
-        for result in MOCK_RESULTS:
-            level = "safe" if result.get("compliant", False) else "unsafe"
-            decorated_mock_results.append(
-                _decorate_result_with_control_relevance(
-                    dict(result),
-                    category=result.get("framework", "general"),
-                    explanation=result.get("reason", "Flagged by safety scorer."),
-                    level=level,
-                    score=result.get("score", 0),
-                    flags=result.get("flags", []),
-                    recommendations=result.get("recommendations", []),
-                    input_text=result.get("name", ""),
-                )
-            )
-        return decorated_mock_results
+        return [dict(result) for result in MOCK_RESULTS]
 
 def get_radar_data(run_id: str = None) -> list[dict]:
     run_data = _get_run_data(run_id)
