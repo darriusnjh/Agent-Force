@@ -4,7 +4,7 @@ import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from config import COLORS, GLOBAL_CSS, LOGO_SVG
-from api_client import get_scenarios, start_run, is_backend_alive
+from api_client import get_scenarios, start_run, is_backend_alive, stream_run
 from components.sidebar import render_sidebar
 from components.topnav import render_topnav, render_page_header
 from components.eval_runner import (
@@ -83,28 +83,47 @@ with col_main:
   </div>""", unsafe_allow_html=True)
 
         if alive:
-            run_id = start_run(
-                agents=[config["agent"]],
-                adaptive=config["adaptive"] or adaptive_run,
-                agent_model=config["agent_model"],
-                scorer_model=config["scorer_model"],
-            )
-            if run_id:
-                st.session_state["last_run_id"] = run_id
-                from api_client import stream_run
-                prog = st.progress(0)
-                log_lines, log_ph = [], st.empty()
-                for i, event in enumerate(stream_run(run_id)):
-                    log_lines.append(str(event))
-                    prog.progress(min(int((i / len(scenarios)) * 100), 99))
-                    with log_ph.container(): render_live_log(log_lines)
-                prog.progress(100)
-                st.success("Evaluation complete — navigate to Results to view scorecard.")
-            else:
-                st.error("Failed to start run. Check API connection.")
+            with st.status("Initializing Agent-Force Engine...", expanded=True) as status_box:
+                run_id = start_run(
+                    agents=[config.get("agent", "default")],
+                    adaptive=config.get("adaptive", False) or adaptive_run,
+                    agent_model=config.get("agent_model"),
+                    scorer_model=config.get("scorer_model"),
+                )
+                
+                if run_id:
+                    st.session_state["last_run_id"] = run_id
+                    prog = st.progress(0)
+                    log_lines, log_ph = [], st.empty()
+                    
+                    # Process the live stream
+                    for i, event in enumerate(stream_run(run_id)):
+                        # Safely extract text from the stream dictionary
+                        msg = event.get("message", event.get("type", str(event)))
+                        log_lines.append(f"> {msg}")
+                        
+                        # Update progress bar safely
+                        max_scenarios = max(len(scenarios), 1)
+                        prog.progress(min(int((i / max_scenarios) * 100), 99))
+                        
+                        with log_ph.container(): 
+                            render_live_log(log_lines)
+                            
+                    prog.progress(100)
+                    status_box.update(label="Evaluation Complete!", state="complete", expanded=False)
+                    
+                    # Set state and teleport the user to the Results page
+                    st.session_state["eval_done"] = True
+                    st.switch_page("pages/3_results.py")
+                else:
+                    status_box.update(label="Failed to start run.", state="error")
+                    st.error("Failed to start run. Check API connection.")
         else:
-            completed = run_mock_evaluation(scenarios)
-            if completed:
-                st.markdown("</div>", unsafe_allow_html=True)
-                st.success("Demo evaluation complete — navigate to Results to view the scorecard.")
-                st.session_state["eval_done"] = True
+            with st.status("Running Demo Evaluation...", expanded=True) as status_box:
+                completed = run_mock_evaluation(scenarios)
+                if completed:
+                    status_box.update(label="Demo Evaluation Complete!", state="complete", expanded=False)
+                    st.session_state["eval_done"] = True
+                    st.switch_page("pages/3_results.py")
+        
+        st.markdown("</div>", unsafe_allow_html=True)
