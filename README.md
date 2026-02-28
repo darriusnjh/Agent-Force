@@ -96,7 +96,7 @@ This will:
 
 ## REST API
 
-The FastAPI server lets any frontend trigger evaluations and stream live results. Runs and scorecards are automatically persisted to a simple `runs.json` file.
+The FastAPI server lets any frontend trigger evaluations and stream live results. Run metadata is persisted to `runs.json`, while full scorecards are stored in `artifacts/runs/<run_id>/scorecard.json` to keep `runs.json` readable.
 
 Start the server:
 

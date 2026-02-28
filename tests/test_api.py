@@ -138,6 +138,35 @@ async def test_run_writes_artifact_folder_contract():
 
 
 @pytest.mark.asyncio
+async def test_runs_json_compacts_results_blob_but_get_run_hydrates():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        response = await ac.post(
+            "/runs",
+            json={
+                "agents": ["email"],
+                "adaptive": False,
+                "sandbox_mode": "world_stateful",
+                "world_pack": "acme_corp_v1",
+                "demo_mode": "deterministic",
+                "trace_level": "full",
+            },
+        )
+        assert response.status_code == 202
+        run_id = response.json()["run_id"]
+
+        run_data = await _wait_until_finished(ac, run_id)
+        assert run_data["status"] == "done"
+        assert run_data["results"]
+
+        with open("test_runs.json", encoding="utf-8") as handle:
+            persisted = json.load(handle)
+
+        assert persisted[run_id]["results"] is None
+        assert persisted[run_id]["result_count"] == len(run_data["results"])
+        assert isinstance(persisted[run_id]["overall_score"], float)
+
+
+@pytest.mark.asyncio
 async def test_regression_sandbox_none_mode_still_runs():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         response = await ac.post(
