@@ -54,6 +54,7 @@ def start_attack_run(
     max_turns: int = 8,
     max_tests: int = 10,
     inbox: dict | None = None,
+    erl: dict | None = None,
     artifacts: dict | None = None,
 ) -> str:
     if target_agent is None:
@@ -77,6 +78,8 @@ def start_attack_run(
     }
     if inbox:
         payload["inbox"] = inbox
+    if erl:
+        payload["erl"] = erl
     if artifacts:
         payload["artifacts"] = artifacts
 

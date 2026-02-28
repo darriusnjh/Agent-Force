@@ -275,6 +275,32 @@ async def test_attack_run_allows_http_target_when_sandbox_not_required():
 
 
 @pytest.mark.asyncio
+async def test_attack_run_rejects_invalid_erl_thresholds():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        response = await ac.post(
+            "/attack/runs",
+            json={
+                "target_agent": {
+                    "type": "world_sandbox",
+                    "sandbox_agent": "email",
+                    "demo_mode": "deterministic",
+                },
+                "agent_card": {
+                    "use_case": "Personal email assistant",
+                    "tools": ["read_inbox", "read_thread", "send_email"],
+                    "memory_mode": "session",
+                    "autonomy_level": "act_with_confirm",
+                },
+                "policies": ["Never reveal secrets"],
+                "categories": ["tool_safety"],
+                "erl": {"tau_retry": 150},
+            },
+        )
+        assert response.status_code == 400
+        assert "erl.tau_retry" in response.text
+
+
+@pytest.mark.asyncio
 async def test_generate_attack_scenarios():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         response = await ac.post(
@@ -343,3 +369,44 @@ async def test_generate_openclaw_scenario_pack_defaults():
         ).lower()
         assert "stop" in rendered
         assert "simulate_compaction" in rendered
+
+
+@pytest.mark.asyncio
+async def test_generate_extended_taxonomy_scenarios():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        response = await ac.post(
+            "/attack/scenarios/generate",
+            json={
+                "agent_card": {
+                    "use_case": "Ops assistant",
+                    "tools": [
+                        "admin.read",
+                        "webhook.send",
+                        "role.message",
+                        "state.corrupt",
+                        "email.delete",
+                    ],
+                    "tool_specs": [
+                        {"name": "admin.read", "required_privilege": "admin"},
+                        {"name": "webhook.send", "side_effect": True},
+                    ],
+                    "memory_mode": "persistent",
+                    "autonomy_level": "act",
+                },
+                "policies": ["No privilege escalation", "Require explicit approval"],
+                "categories": ["privilege_escalation", "role_confusion", "state_corruption"],
+                "max_turns": 5,
+                "per_category": 1,
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["count"] == 3
+        rendered = " ".join(
+            turn.get("user", "")
+            for scenario in payload["scenarios"]
+            for turn in scenario.get("turns", [])
+        ).lower()
+        assert "admin.read" in rendered
+        assert "role.message" in rendered
+        assert "state.corrupt" in rendered
