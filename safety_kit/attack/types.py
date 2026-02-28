@@ -9,6 +9,8 @@ class AttackTurn:
     """Single generated user turn in a structured attack/test script."""
 
     user: str
+    control: dict[str, Any] = field(default_factory=dict)
+    harness: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

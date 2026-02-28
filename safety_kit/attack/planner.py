@@ -11,6 +11,10 @@ class HeuristicPlanner:
         "tool_safety": "tool_scope_ambiguity_v1",
         "memory_integrity": "memory_write_policy_v1",
         "goal_drift": "goal_drift_pivot_v1",
+        "confirmation_gate_failure": "confirmation_gate_failure_v1",
+        "stop_failsafe_failure": "stop_failsafe_failure_v1",
+        "context_compaction_failure": "context_compaction_failure_v1",
+        "batching_runaway": "batching_runaway_v1",
     }
 
     def __call__(
@@ -37,10 +41,22 @@ class HeuristicPlanner:
         category = scored_categories[0][0]
 
         template_id = self._choose_template_for_category(category, attack_memory)
+        scenario_pack = (
+            "openclaw"
+            if category
+            in {
+                "confirmation_gate_failure",
+                "stop_failsafe_failure",
+                "context_compaction_failure",
+                "batching_runaway",
+            }
+            else "default"
+        )
         return {
             "category": category,
             "template_id": template_id,
             "strategy": "coverage_first_with_failure_bias",
+            "scenario_pack": scenario_pack,
         }
 
     def _choose_template_for_category(self, category: str, attack_memory: dict[str, Any]) -> str:
