@@ -153,7 +153,15 @@ class AttackTarget(BaseModel):
     endpoint: Optional[str] = None
     auth: Optional[str] = None
     mock_script: Optional[List[Dict[str, Any]]] = None
-    sandbox_agent: Literal["email", "web_search", "code_exec"] = "email"
+    sandbox_agent: Literal[
+        "email",
+        "web_search",
+        "code_exec",
+        "finance_ops",
+        "customer_support",
+        "devops_incident",
+        "generic",
+    ] = "email"
     world_pack: str = "acme_corp_v1"
     demo_mode: Literal["live_hybrid", "deterministic"] = "deterministic"
     trace_level: Literal["summary", "full"] = "full"

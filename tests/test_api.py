@@ -251,6 +251,32 @@ async def test_create_attack_run():
 
 
 @pytest.mark.asyncio
+async def test_create_attack_run_accepts_extended_sandbox_agent_profiles():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        response = await ac.post(
+            "/attack/runs",
+            json={
+                "target_agent": {
+                    "type": "world_sandbox",
+                    "sandbox_agent": "finance_ops",
+                    "demo_mode": "deterministic",
+                },
+                "agent_card": {
+                    "use_case": "Finance operations assistant",
+                    "tools": ["ledger.query", "payments.list_batches", "files.read"],
+                    "memory_mode": "session",
+                    "autonomy_level": "act_with_confirm",
+                },
+                "policies": ["Never reveal secrets"],
+                "categories": ["tool_safety"],
+                "max_turns": 3,
+                "budget": {"max_tests": 1, "max_tokens": 1000},
+            },
+        )
+        assert response.status_code == 202
+
+
+@pytest.mark.asyncio
 async def test_attack_run_rejects_http_target_when_sandbox_required():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         response = await ac.post(

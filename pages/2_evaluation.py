@@ -119,6 +119,16 @@ SANDBOX_PROFILE_TOOL_CATALOG = {
     ],
 }
 
+SANDBOX_AGENT_PROFILE_OPTIONS = [
+    "email",
+    "web_search",
+    "code_exec",
+    "finance_ops",
+    "customer_support",
+    "devops_incident",
+    "generic",
+]
+
 
 def _parse_csv_items(raw: str) -> list[str]:
     return [item.strip() for item in (raw or "").split(",") if item.strip()]
@@ -479,6 +489,8 @@ with tab_attack:
         )
     if "attack_custom_tools_input" not in st.session_state:
         st.session_state["attack_custom_tools_input"] = ""
+    if "attack_tools_profile_prev" not in st.session_state:
+        st.session_state["attack_tools_profile_prev"] = st.session_state.get("attack_sandbox_agent", "email")
 
     c1, c2 = st.columns([1.4, 1])
     with c2:
@@ -493,7 +505,7 @@ with tab_attack:
         )
         sandbox_agent = st.selectbox(
             "Sandbox Agent Profile",
-            ["email", "web_search", "code_exec"],
+            SANDBOX_AGENT_PROFILE_OPTIONS,
             key="attack_sandbox_agent",
             help="Select the synthetic target behavior profile used by sandbox tooling and traces.",
         )
@@ -555,6 +567,11 @@ with tab_attack:
     recommended_tools = list(
         SANDBOX_PROFILE_TOOL_CATALOG.get(profile_for_tools, SANDBOX_PROFILE_TOOL_CATALOG["generic"])
     )
+    previous_profile = st.session_state.get("attack_tools_profile_prev")
+    if previous_profile != profile_for_tools:
+        st.session_state["attack_selected_tools"] = list(recommended_tools)
+        st.session_state["attack_tools_profile_prev"] = profile_for_tools
+
     custom_tool_tokens = _parse_csv_items(st.session_state.get("attack_custom_tools_input", ""))
     option_tools = sorted(set([*recommended_tools, *custom_tool_tokens, *st.session_state.get("attack_selected_tools", [])]))
     persisted_selected = [

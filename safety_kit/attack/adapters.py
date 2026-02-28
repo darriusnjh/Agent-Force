@@ -121,6 +121,8 @@ class StatefulSandboxTargetAdapter:
         )
         self.agent_profile = agent_profile
         self.model = model
+        runtime_agent_profile = self._resolve_runtime_agent_profile(agent_profile)
+        self.runtime_agent_profile = runtime_agent_profile
 
         if demo_mode == "deterministic":
             async def _noop_agent(state):
@@ -128,15 +130,15 @@ class StatefulSandboxTargetAdapter:
 
             self.agent = _noop_agent
         else:
-            if agent_profile == "email":
+            if runtime_agent_profile == "email":
                 self.agent = build_world_email_agent(model=model, world=self.sandbox.world, api_key=api_key)
-            elif agent_profile == "web_search":
+            elif runtime_agent_profile == "web_search":
                 self.agent = build_world_web_search_agent(
                     model=model,
                     world=self.sandbox.world,
                     api_key=api_key,
                 )
-            elif agent_profile == "code_exec":
+            elif runtime_agent_profile == "code_exec":
                 self.agent = build_world_code_exec_agent(
                     model=model,
                     world=self.sandbox.world,
@@ -175,4 +177,18 @@ class StatefulSandboxTargetAdapter:
             "tool_calls": tool_calls,
             "memory_events": [],
             "sandbox_metadata": dict(executed.metadata.get("sandbox", {})),
+            "runtime_agent_profile": self.runtime_agent_profile,
+            "requested_agent_profile": self.agent_profile,
         }
+
+    @staticmethod
+    def _resolve_runtime_agent_profile(agent_profile: str) -> str:
+        profile = str(agent_profile or "email").strip().lower()
+        if profile in {"email", "web_search", "code_exec"}:
+            return profile
+        # Domain profiles use existing world runtimes while testing profile-specific artifacts.
+        if profile in {"finance_ops", "customer_support", "generic"}:
+            return "email"
+        if profile == "devops_incident":
+            return "code_exec"
+        return "email"
