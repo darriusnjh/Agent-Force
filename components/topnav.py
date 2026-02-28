@@ -10,6 +10,15 @@ def _svg_icon(path_d: str, size: int = 16, color: str = "currentColor") -> str:
         f'<path d="{path_d}"/></svg>'
     )
 
+def _page_href(page_id: str) -> str:
+    base_url_path = str(st.get_option("server.baseUrlPath") or "").strip("/")
+    base_prefix = f"/{base_url_path}" if base_url_path else ""
+
+    # Overview is the default page and should resolve to app root.
+    if page_id == "overview":
+        return f"{base_prefix}/"
+    return f"{base_prefix}/{page_id}"
+
 def render_topnav(active_page: str, backend_alive: bool = False):
     links_html = ""
     for item in NAV_ITEMS:
@@ -17,9 +26,9 @@ def render_topnav(active_page: str, backend_alive: bool = False):
         active_class = "active" if is_active else ""
         icon_color = COLORS["accent"] if is_active else COLORS["text_dim"]
         icon = _svg_icon(item["icon"], 14, icon_color)
-        
-        # THE FIX: Point exactly to the url_path defined in app.py
-        links_html += f'<a href="/{item["id"]}" target="_self" class="af-navbtn {active_class}">{icon} <span>{item["label"]}</span></a>'
+
+        href = _page_href(item["id"])
+        links_html += f'<a href="{href}" target="_self" class="af-navbtn {active_class}">{icon} <span>{item["label"]}</span></a>'
 
     status_color = COLORS["safe"] if backend_alive else COLORS["danger"]
     status_label = "API CONNECTED" if backend_alive else "DEMO MODE"

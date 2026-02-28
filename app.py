@@ -86,7 +86,7 @@ if "eval_running" not in st.session_state:
 
 # 5. Define the pages and explicitly set their URL paths
 pages = [
-    st.Page("pages/1_overview.py", title="Overview", url_path="overview"),
+    st.Page("pages/1_overview.py", title="Overview", url_path="overview", default=True),
     st.Page("pages/2_evaluation.py", title="Evaluation", url_path="evaluation"),
     st.Page("pages/3_results.py", title="Results", url_path="results"),
     st.Page("pages/4_recommendations.py", title="Recommendations", url_path="recommendations")
