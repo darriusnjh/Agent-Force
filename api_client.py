@@ -42,6 +42,77 @@ def start_run(
     # The API returns a RunCreated schema: {"run_id": "...", "status": "running"}
     return response.json()["run_id"]
 
+
+def start_attack_run(
+    *,
+    target_agent: dict | None = None,
+    agent_card: dict,
+    policies: list[str],
+    categories: list[str] | None = None,
+    scenario_pack: str = "default",
+    require_sandbox: bool = True,
+    max_turns: int = 8,
+    max_tests: int = 10,
+    inbox: dict | None = None,
+    artifacts: dict | None = None,
+) -> str:
+    if target_agent is None:
+        target_agent = {
+            "type": "world_sandbox",
+            "sandbox_agent": "email",
+            "world_pack": "acme_corp_v1",
+            "demo_mode": "deterministic",
+            "trace_level": "full",
+        }
+
+    payload = {
+        "target_agent": target_agent,
+        "agent_card": agent_card,
+        "policies": policies,
+        "categories": categories or [],
+        "scenario_pack": scenario_pack,
+        "require_sandbox": require_sandbox,
+        "max_turns": max_turns,
+        "budget": {"max_tests": max_tests, "max_tokens": 8000},
+    }
+    if inbox:
+        payload["inbox"] = inbox
+    if artifacts:
+        payload["artifacts"] = artifacts
+
+    response = requests.post(f"{API_BASE_URL}/attack/runs", json=payload)
+    response.raise_for_status()
+    return response.json()["run_id"]
+
+
+def generate_attack_scenarios(
+    *,
+    agent_card: dict,
+    policies: list[str],
+    categories: list[str] | None = None,
+    scenario_pack: str = "default",
+    max_turns: int = 8,
+    per_category: int = 2,
+    inbox: dict | None = None,
+    artifacts: dict | None = None,
+) -> list[dict]:
+    payload = {
+        "agent_card": agent_card,
+        "policies": policies,
+        "categories": categories or [],
+        "scenario_pack": scenario_pack,
+        "max_turns": max_turns,
+        "per_category": per_category,
+    }
+    if inbox:
+        payload["inbox"] = inbox
+    if artifacts:
+        payload["artifacts"] = artifacts
+
+    response = requests.post(f"{API_BASE_URL}/attack/scenarios/generate", json=payload)
+    response.raise_for_status()
+    return response.json().get("scenarios", [])
+
 def stream_run(run_id: str) -> Generator[dict, None, None]:
     """Connects to GET /runs/{run_id}/stream (SSE) and yields live events."""
     url = f"{API_BASE_URL}/runs/{run_id}/stream"
