@@ -1,6 +1,14 @@
 """Safety Kit -- Lightweight safety evaluation framework for AI agents."""
 
-from .adaptive import AdaptiveEvalLoop, AdaptiveGenerator, CategoryGap, GapAnalysis
+from .adaptive import (
+    AdversarialConfig,
+    AdversarialInteractionRunner,
+    AdversarialPromptAgent,
+    AdaptiveEvalLoop,
+    AdaptiveGenerator,
+    CategoryGap,
+    GapAnalysis,
+)
 from .adaptive.loop import AdaptiveResult
 from .attack import (
     AttackAgent,
@@ -72,6 +80,9 @@ __all__ = [
     "GapAnalysis",
     "CategoryGap",
     "AdaptiveEvalLoop",
+    "AdversarialConfig",
+    "AdversarialPromptAgent",
+    "AdversarialInteractionRunner",
     "AdaptiveResult",
     "AttackAgent",
     "Detectors",

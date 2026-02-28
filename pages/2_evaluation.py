@@ -340,6 +340,37 @@ with tab_standard:
             help="Displayed in run context and results framing.",
         )
 
+    cfg9, cfg10, cfg11 = st.columns(3)
+    with cfg9:
+        std_adversarial_adaptive = st.toggle(
+            "Adversarial Adaptive Mode",
+            key="std_adversarial_adaptive",
+            help=(
+                "Runs an adversarial attacker loop against each sandbox sample and "
+                "stops early when a safety violation is detected."
+            ),
+        )
+    with cfg10:
+        if std_adversarial_adaptive:
+            std_adversarial_max_turns = st.slider(
+                "Adversarial Max Turns",
+                1,
+                10,
+                4,
+                key="std_adversarial_max_turns",
+            )
+        else:
+            std_adversarial_max_turns = 4
+            st.session_state["std_adversarial_max_turns"] = 4
+            st.caption("Fixed: 4")
+    with cfg11:
+        std_adversarial_stop_on_violation = st.toggle(
+            "Stop On First Violation",
+            value=True,
+            key="std_adversarial_stop_on_violation",
+            help="Stop the attacker-target interaction as soon as a violation is detected.",
+        )
+
     st.markdown("</div>", unsafe_allow_html=True)
     std_config = {
         "agent": std_agent,
@@ -350,6 +381,9 @@ with tab_standard:
         "epochs": std_epochs,
         "max_rounds": std_max_rounds,
         "samples_per_round": std_samples_per_round,
+        "adversarial_adaptive": std_adversarial_adaptive,
+        "adversarial_max_turns": std_adversarial_max_turns,
+        "adversarial_stop_on_violation": std_adversarial_stop_on_violation,
     }
 
     col_main, col_info = st.columns([2, 1])
@@ -474,6 +508,11 @@ with tab_standard:
                         scorer_model=std_config.get("scorer_model"),
                         max_rounds=std_config.get("max_rounds", 3),
                         samples_per_round=std_config.get("samples_per_round", 4),
+                        adversarial_adaptive=bool(std_config.get("adversarial_adaptive", False)),
+                        adversarial_max_turns=int(std_config.get("adversarial_max_turns", 4)),
+                        adversarial_stop_on_violation=bool(
+                            std_config.get("adversarial_stop_on_violation", True)
+                        ),
                         mcp_registry_links=std_mcp_registry_links,
                         mcp_server_urls=std_mcp_server_urls,
                         mcp_server_command=(std_mcp_server_command or "").strip() or None,
@@ -583,6 +622,46 @@ with tab_standard:
                                                 "output": tool_output[:200],
                                             }
                                         )
+                            elif event_type == "adversarial_turn":
+                                turn = int(event.get("turn") or 0)
+                                prompt = str(event.get("attacker_prompt", "")).strip()
+                                out = str(event.get("agent_output", "")).strip()
+                                detected = bool(event.get("detected_violation", False))
+                                vi_types = event.get("violation_types", []) or []
+                                status = "violation" if detected else "no_violation"
+                                log_lines.append(
+                                    f"[{agent_name}] sample {sample_index} adversarial turn {turn} ({status})"
+                                )
+                                if prompt:
+                                    interaction_rows.append(
+                                        {
+                                            "sample": sample_index,
+                                            "role": f"attacker(t{turn})",
+                                            "text": prompt[:260],
+                                        }
+                                    )
+                                if out:
+                                    interaction_rows.append(
+                                        {
+                                            "sample": sample_index,
+                                            "role": f"agent(t{turn})",
+                                            "text": out[:260],
+                                        }
+                                    )
+                                if detected:
+                                    interaction_rows.append(
+                                        {
+                                            "sample": sample_index,
+                                            "role": "vulnerability",
+                                            "text": f"Detected: {', '.join(str(v) for v in vi_types[:4])}",
+                                        }
+                                    )
+                            elif event_type == "sample_vulnerability":
+                                log_lines.append(
+                                    f"[{agent_name}] sample {sample_index} vulnerability flagged "
+                                    f"(turn={event.get('first_violation_turn')}, "
+                                    f"reason={str(event.get('stop_reason', 'detected'))[:80]})"
+                                )
                             elif event_type == "sample_agent_error":
                                 log_lines.append(
                                     f"[{agent_name}] sample {sample_index} agent error: "

@@ -196,6 +196,30 @@ async def test_adaptive_run_is_accepted_with_sandbox_fields():
 
 
 @pytest.mark.asyncio
+async def test_adversarial_adaptive_run_is_accepted():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        response = await ac.post(
+            "/runs",
+            json={
+                "agents": ["email"],
+                "adaptive": True,
+                "max_rounds": 1,
+                "samples_per_round": 1,
+                "sandbox_mode": "world_stateful",
+                "demo_mode": "deterministic",
+                "adversarial_adaptive": True,
+                "adversarial_max_turns": 2,
+                "adversarial_stop_on_violation": True,
+            },
+        )
+        assert response.status_code == 202
+        run_id = response.json()["run_id"]
+        run_data = await _wait_until_finished(ac, run_id)
+        assert run_data["status"] in {"done", "error"}
+        assert run_data["config"]["adversarial_adaptive"] is True
+
+
+@pytest.mark.asyncio
 async def test_mcp_registry_links_are_resolved_and_persisted():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         response = await ac.post(

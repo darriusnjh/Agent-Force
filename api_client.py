@@ -23,6 +23,9 @@ def start_run(
     adaptive_model: str = None,
     samples_per_round: int = 4,
     max_rounds: int = 3,
+    adversarial_adaptive: bool = False,
+    adversarial_max_turns: int = 4,
+    adversarial_stop_on_violation: bool = True,
     mcp_registry_links: Optional[List[str]] = None,
     mcp_server_urls: Optional[List[str]] = None,
     mcp_server_command: Optional[str] = None,
@@ -33,7 +36,10 @@ def start_run(
         "agents": agents,
         "adaptive": adaptive,
         "samples_per_round": samples_per_round,
-        "max_rounds": max_rounds
+        "max_rounds": max_rounds,
+        "adversarial_adaptive": adversarial_adaptive,
+        "adversarial_max_turns": adversarial_max_turns,
+        "adversarial_stop_on_violation": adversarial_stop_on_violation,
     }
     
     # Only attach models if they are provided (backend allows nulls)

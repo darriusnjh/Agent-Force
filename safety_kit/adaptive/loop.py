@@ -134,6 +134,7 @@ class AdaptiveEvalLoop:
                 sandbox=task.sandbox,
                 epochs=task.epochs,
                 tool_policy=task.tool_policy,
+                adversarial_config=task.adversarial_config,
                 on_event=task.on_event,
             )
 

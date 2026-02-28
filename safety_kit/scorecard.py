@@ -222,6 +222,10 @@ class Scorecard:
                         for a in r.state.actions
                     ],
                     "tool_policy_violations": r.state.metadata.get("tool_policy_violations", []),
+                    "vulnerability_report": r.state.metadata.get("vulnerability_report", {}),
+                    "adversarial_trace": (
+                        (r.state.metadata.get("adversarial", {}) or {}).get("trace", [])
+                    ),
                     "score": r.score.value,
                     "level": r.score.level.value,
                     "explanation": r.score.explanation,

@@ -123,6 +123,9 @@ class RunRequest(BaseModel):
 
     max_rounds: int = 3
     """Maximum adaptive rounds (adaptive=True only)."""
+    adversarial_adaptive: bool = False
+    adversarial_max_turns: int = 4
+    adversarial_stop_on_violation: bool = True
 
     sandbox_mode: Literal["none", "world_stateful"] = "world_stateful"
     world_pack: str = "acme_corp_v1"
@@ -368,6 +371,31 @@ async def _run_evaluation(run_id: str, req: RunRequest) -> None:
         artifact_writer = ArtifactWriter(run_id=run_id, config=req.model_dump())
 
         resolved_mcp_manifests, mcp_resolution_errors = resolve_registry_links(req.mcp_registry_links)
+        if req.adversarial_adaptive:
+            await store.append_event(
+                run_id,
+                {
+                    "type": "adversarial_adaptive_enabled",
+                    "message": (
+                        "Adversarial adaptive mode enabled "
+                        f"(max_turns={req.adversarial_max_turns}, "
+                        f"stop_on_violation={req.adversarial_stop_on_violation})"
+                    ),
+                    "max_turns": req.adversarial_max_turns,
+                    "stop_on_violation": req.adversarial_stop_on_violation,
+                },
+            )
+            if req.sandbox_mode != "world_stateful":
+                await store.append_event(
+                    run_id,
+                    {
+                        "type": "adversarial_adaptive_notice",
+                        "message": (
+                            "Adversarial adaptive mode is most effective in sandbox_mode="
+                            "'world_stateful'. Current mode may have limited sandbox context."
+                        ),
+                    },
+                )
         await store.append_event(
             run_id,
             {
@@ -412,6 +440,7 @@ async def _run_evaluation(run_id: str, req: RunRequest) -> None:
         aggregate_confirmed: list[dict] = []
         aggregate_rejected: list[dict] = []
         aggregate_rule_miss: list[dict] = []
+        aggregate_adversarial_vulnerabilities: list[dict] = []
         fallback_used = False
 
         for key in req.agents:
@@ -495,6 +524,12 @@ async def _run_evaluation(run_id: str, req: RunRequest) -> None:
                 solver=solver,
                 scorer=scorer,
                 sandbox=sandbox,
+                adversarial_config={
+                    "enabled": bool(req.adversarial_adaptive and req.sandbox_mode == "world_stateful"),
+                    "attacker_model": adaptive_model,
+                    "max_turns": req.adversarial_max_turns,
+                    "stop_on_violation": req.adversarial_stop_on_violation,
+                },
                 on_event=on_eval_event,
             )
 
@@ -526,6 +561,32 @@ async def _run_evaluation(run_id: str, req: RunRequest) -> None:
                 scorecard_dict = (
                     scorecard.to_dict() if hasattr(scorecard, "to_dict") else _scorecard_to_dict(scorecard)
                 )
+                agent_vulns: list[dict[str, Any]] = []
+                for sample_row in scorecard_dict.get("results", []):
+                    if not isinstance(sample_row, dict):
+                        continue
+                    report = sample_row.get("vulnerability_report", {}) or {}
+                    if bool(report.get("detected", False)):
+                        vuln = {
+                            "agent": key,
+                            "category": sample_row.get("category", "general"),
+                            "input": str(sample_row.get("input", ""))[:260],
+                            "first_violation_turn": report.get("first_violation_turn"),
+                            "turns_executed": report.get("turns_executed"),
+                            "stop_reason": report.get("stop_reason"),
+                        }
+                        agent_vulns.append(vuln)
+                if agent_vulns:
+                    aggregate_adversarial_vulnerabilities.extend(agent_vulns)
+                    await store.append_event(
+                        run_id,
+                        {
+                            "type": "adversarial_vulnerabilities",
+                            "agent": key,
+                            "count": len(agent_vulns),
+                            "samples": agent_vulns[:5],
+                        },
+                    )
                 results.append(
                     {
                         "agent": key,
@@ -577,6 +638,7 @@ async def _run_evaluation(run_id: str, req: RunRequest) -> None:
                 "rule_hit_llm_reject": aggregate_rejected,
                 "llm_hit_rule_miss": aggregate_rule_miss,
             },
+            "adversarial_vulnerabilities": aggregate_adversarial_vulnerabilities,
             "mcp_resolution_errors": mcp_resolution_errors,
         }
 
@@ -589,6 +651,7 @@ async def _run_evaluation(run_id: str, req: RunRequest) -> None:
             "fallback_used": fallback_used,
             "confirmed_violation_count": len(aggregate_confirmed),
             "rule_hit_count": len(aggregate_rule_hits),
+            "adversarial_vulnerability_count": len(aggregate_adversarial_vulnerabilities),
             "disagreements": {
                 "rule_hit_llm_reject": len(aggregate_rejected),
                 "llm_hit_rule_miss": len(aggregate_rule_miss),
@@ -597,6 +660,9 @@ async def _run_evaluation(run_id: str, req: RunRequest) -> None:
             "mcp_server_url_count": len(req.mcp_server_urls),
             "mcp_server_command": req.mcp_server_command,
             "mcp_server_arg_count": len(req.mcp_server_args),
+            "adversarial_adaptive": req.adversarial_adaptive,
+            "adversarial_max_turns": req.adversarial_max_turns,
+            "adversarial_stop_on_violation": req.adversarial_stop_on_violation,
             "scorer_fallback_used": scorer_fallback_used,
         }
 
@@ -622,6 +688,9 @@ async def _run_evaluation(run_id: str, req: RunRequest) -> None:
                 "mcp_server_urls": req.mcp_server_urls,
                 "mcp_server_command": req.mcp_server_command,
                 "mcp_server_args": _normalise_mcp_command_args(req.mcp_server_args),
+                "adversarial_adaptive": req.adversarial_adaptive,
+                "adversarial_max_turns": req.adversarial_max_turns,
+                "adversarial_stop_on_violation": req.adversarial_stop_on_violation,
             }
         )
 
@@ -767,6 +836,8 @@ def _scorecard_to_dict(sc) -> dict[str, Any]:
                 "explanation": r.score.explanation,
                 "flags": r.score.flags,
                 "recommendations": r.score.recommendations,
+                "vulnerability_report": (r.state.metadata.get("vulnerability_report", {}) or {}),
+                "adversarial_trace": ((r.state.metadata.get("adversarial", {}) or {}).get("trace", [])),
             }
             for r in sc.results
         ],
@@ -791,6 +862,8 @@ async def create_run(req: RunRequest) -> RunCreated:
     bad = [a for a in req.agents if a not in valid_agents]
     if bad:
         raise HTTPException(400, f"Unknown agent(s): {bad}. Valid: {sorted(valid_agents)}")
+    if req.adversarial_max_turns < 1 or req.adversarial_max_turns > 20:
+        raise HTTPException(400, "adversarial_max_turns must be between 1 and 20")
 
     run_id = str(uuid.uuid4())
     await store.create_run(run_id, req.model_dump())
