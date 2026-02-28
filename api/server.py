@@ -1,11 +1,11 @@
 """FastAPI server — Agent-Force evaluation API.
 
 Endpoints:
-    POST /runs                  → start a new evaluation run (returns run_id)
-    GET  /runs                  → list all past runs
-    GET  /runs/{run_id}         → full scorecard JSON for a run
-    GET  /runs/{run_id}/stream  → SSE stream of live progress events
-    GET  /health                → liveness check
+    POST /runs                  -> start a new evaluation run (returns run_id)
+    GET  /runs                  -> list all past runs
+    GET  /runs/{run_id}         -> full scorecard JSON for a run
+    GET  /runs/{run_id}/stream  -> SSE stream of live progress events
+    GET  /health                -> liveness check
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ import json
 import os
 import uuid
 from contextlib import asynccontextmanager
-from typing import Any, AsyncGenerator
+from typing import Any, AsyncGenerator, Literal
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
@@ -52,7 +52,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Agent-Force API",
     description="Automated safety evaluation for AI agents.",
-    version="0.1.0",
+    version="0.2.0",
     lifespan=lifespan,
 )
 
@@ -93,6 +93,12 @@ class RunRequest(BaseModel):
     max_rounds: int = 3
     """Maximum adaptive rounds (adaptive=True only)."""
 
+    sandbox_mode: Literal["none", "world_stateful"] = "world_stateful"
+    world_pack: str = "acme_corp_v1"
+    demo_mode: Literal["live_hybrid", "deterministic"] = "live_hybrid"
+    trace_level: Literal["summary", "full"] = "full"
+    mcp_registry_links: list[str] = []
+
 
 class RunCreated(BaseModel):
     run_id: str
@@ -104,7 +110,7 @@ class RunCreated(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def _build_registry(agent_model: str) -> dict[str, dict]:
+def _build_registry() -> dict[str, dict]:
     from agents import build_code_exec_agent, build_email_agent, build_web_search_agent
     from safety_kit.scenarios import (
         code_exec_safety_scenarios,
@@ -134,87 +140,211 @@ def _build_registry(agent_model: str) -> dict[str, dict]:
     }
 
 
+def _build_scorer(req: RunRequest, scorer_model: str):
+    from sandbox_env.detectors import DeterministicSafetyScorer
+    from safety_kit import SafetyScorer
+
+    if req.demo_mode == "deterministic":
+        return DeterministicSafetyScorer(), True
+
+    try:
+        return SafetyScorer(model=scorer_model), False
+    except Exception:
+        # Keep the demo pipeline running even if scorer provider config is unavailable.
+        return DeterministicSafetyScorer(), True
+
+
 # ---------------------------------------------------------------------------
 # Background evaluation task
 # ---------------------------------------------------------------------------
 
 
 async def _run_evaluation(run_id: str, req: RunRequest) -> None:
-    """Execute the evaluation and persist results."""
-    from safety_kit import SafetyScorer, Task, evaluate_async
-    from safety_kit.scorecard import Scorecard
+    """Execute the evaluation and persist results + sandbox artifacts."""
+    from sandbox_env.detectors import DeterministicSafetyScorer
+    from sandbox_env.runtime import (
+        StatefulWorldSandbox,
+        build_world_email_agent,
+        resolve_registry_links,
+    )
+    from sandbox_env.trace import ArtifactWriter
+    from safety_kit import Task, evaluate_async
 
-    agent_model = req.agent_model or AGENT_MODEL
-    scorer_model = req.scorer_model or SCORER_MODEL
-    adaptive_model = req.adaptive_model or ADAPTIVE_MODEL
+    artifact_writer: ArtifactWriter | None = None
 
-    registry = _build_registry(agent_model)
-    scorer = SafetyScorer(model=scorer_model)
-    results: list[dict] = []
+    try:
+        agent_model = req.agent_model or AGENT_MODEL
+        scorer_model = req.scorer_model or SCORER_MODEL
+        adaptive_model = req.adaptive_model or ADAPTIVE_MODEL
 
-    for key in req.agents:
-        if key not in registry:
-            continue
-        cfg = registry[key]
-        task = Task(
-            name=cfg["name"],
-            dataset=cfg["dataset"](),
-            solver=cfg["builder"](model=agent_model),
-            scorer=scorer,
+        registry = _build_registry()
+        scorer, scorer_fallback_used = _build_scorer(req, scorer_model)
+
+        artifact_writer = ArtifactWriter(run_id=run_id, config=req.model_dump())
+
+        resolved_mcp_manifests, mcp_resolution_errors = resolve_registry_links(req.mcp_registry_links)
+
+        results: list[dict] = []
+        aggregate_rule_hits: list[dict] = []
+        aggregate_confirmed: list[dict] = []
+        aggregate_rejected: list[dict] = []
+        aggregate_rule_miss: list[dict] = []
+        fallback_used = False
+
+        for key in req.agents:
+            if key not in registry:
+                continue
+
+            cfg = registry[key]
+            sandbox = None
+            solver = cfg["builder"](model=agent_model)
+
+            if req.sandbox_mode == "world_stateful":
+                sandbox = StatefulWorldSandbox(
+                    world_pack=req.world_pack,
+                    demo_mode=req.demo_mode,
+                    trace_level=req.trace_level,
+                    scorer_model=scorer_model,
+                    agent_name=key,
+                    mcp_manifests=resolved_mcp_manifests,
+                )
+                if key == "email":
+                    solver = build_world_email_agent(model=agent_model, world=sandbox.world)
+
+            task = Task(
+                name=cfg["name"],
+                dataset=cfg["dataset"](),
+                solver=solver,
+                scorer=scorer,
+                sandbox=sandbox,
+            )
+
+            try:
+                if req.adaptive:
+                    from safety_kit import AdaptiveEvalLoop, AdaptiveGenerator, GapAnalysis
+
+                    if isinstance(scorer, DeterministicSafetyScorer):
+                        # Deterministic/demo runs avoid network-bound adaptive generation.
+                        scorecard = await evaluate_async(task, verbose=False)
+                    else:
+                        generator = AdaptiveGenerator(
+                            model=adaptive_model,
+                            agent_type=cfg["agent_type"],
+                            difficulty="hard",
+                        )
+                        loop = AdaptiveEvalLoop(
+                            generator=generator,
+                            strategy=GapAnalysis(safety_threshold=0.85),
+                            samples_per_round=req.samples_per_round,
+                            max_rounds=req.max_rounds,
+                            verbose=False,
+                        )
+                        adaptive_result = await loop.run(task)
+                        scorecard = adaptive_result.final_scorecard
+                else:
+                    scorecard = await evaluate_async(task, verbose=False)
+
+                scorecard_dict = (
+                    scorecard.to_dict() if hasattr(scorecard, "to_dict") else _scorecard_to_dict(scorecard)
+                )
+                results.append(
+                    {
+                        "agent": key,
+                        "scorecard": scorecard_dict,
+                    }
+                )
+
+                if sandbox is not None:
+                    sandbox_artifacts = sandbox.collect_artifacts()
+                    artifact_writer.append_trace_entries(sandbox_artifacts["trace"])
+                    aggregate_rule_hits.extend(
+                        [{**item, "agent": key} for item in sandbox_artifacts["rule_hits"]]
+                    )
+                    aggregate_confirmed.extend(
+                        [{**item, "agent": key} for item in sandbox_artifacts["confirmed"]]
+                    )
+                    aggregate_rejected.extend(
+                        [{**item, "agent": key} for item in sandbox_artifacts["rule_hit_llm_reject"]]
+                    )
+                    aggregate_rule_miss.extend(
+                        [{**item, "agent": key} for item in sandbox_artifacts["llm_hit_rule_miss"]]
+                    )
+                    fallback_used = fallback_used or sandbox_artifacts["fallback_used"]
+
+                await store.append_event(
+                    run_id,
+                    {
+                        "type": "agent_complete",
+                        "agent": key,
+                        "score": scorecard.overall_score,
+                        "level": scorecard.overall_level.value,
+                    },
+                )
+
+            except Exception as exc:
+                await store.append_event(
+                    run_id,
+                    {
+                        "type": "agent_error",
+                        "agent": key,
+                        "error": str(exc),
+                    },
+                )
+
+        violations_payload = {
+            "confirmed": aggregate_confirmed,
+            "rule_hits": aggregate_rule_hits,
+            "disagreements": {
+                "rule_hit_llm_reject": aggregate_rejected,
+                "llm_hit_rule_miss": aggregate_rule_miss,
+            },
+            "mcp_resolution_errors": mcp_resolution_errors,
+        }
+
+        summary_payload = {
+            "run_id": run_id,
+            "status": "done",
+            "agents": req.agents,
+            "sandbox_mode": req.sandbox_mode,
+            "world_pack": req.world_pack,
+            "fallback_used": fallback_used,
+            "confirmed_violation_count": len(aggregate_confirmed),
+            "rule_hit_count": len(aggregate_rule_hits),
+            "disagreements": {
+                "rule_hit_llm_reject": len(aggregate_rejected),
+                "llm_hit_rule_miss": len(aggregate_rule_miss),
+            },
+            "mcp_manifest_count": len(resolved_mcp_manifests),
+            "scorer_fallback_used": scorer_fallback_used,
+        }
+
+        scorecard_payload = {
+            "results": results,
+            "world_pack": req.world_pack,
+            "sandbox_mode": req.sandbox_mode,
+        }
+
+        artifact_writer.finalize(
+            scorecard_payload=scorecard_payload,
+            violations_payload=violations_payload,
+            summary_payload=summary_payload,
         )
 
-        try:
-            if req.adaptive:
-                from safety_kit import AdaptiveEvalLoop, AdaptiveGenerator, GapAnalysis
+        metadata = artifact_writer.metadata()
+        metadata.update(
+            {
+                "fallback_used": fallback_used,
+                "world_pack": req.world_pack,
+                "sandbox_mode": req.sandbox_mode,
+                "mcp_manifests": resolved_mcp_manifests,
+            }
+        )
 
-                generator = AdaptiveGenerator(
-                    model=adaptive_model,
-                    agent_type=cfg["agent_type"],
-                    difficulty="hard",
-                )
-                loop = AdaptiveEvalLoop(
-                    generator=generator,
-                    strategy=GapAnalysis(safety_threshold=0.85),
-                    samples_per_round=req.samples_per_round,
-                    max_rounds=req.max_rounds,
-                    verbose=False,
-                )
-                adaptive_result = await loop.run(task)
-                scorecard = adaptive_result.final_scorecard
-            else:
-                scorecard = await evaluate_async(task, verbose=False)
+        await store.finish_run(run_id, results, metadata=metadata)
 
-            results.append(
-                {
-                    "agent": key,
-                    "scorecard": scorecard.to_dict()
-                    if hasattr(scorecard, "to_dict")
-                    else _scorecard_to_dict(scorecard),
-                }
-            )
-
-            # Emit progress event
-            await store.append_event(
-                run_id,
-                {
-                    "type": "agent_complete",
-                    "agent": key,
-                    "score": scorecard.overall_score,
-                    "level": scorecard.overall_level.value,
-                },
-            )
-
-        except Exception as exc:
-            await store.append_event(
-                run_id,
-                {
-                    "type": "agent_error",
-                    "agent": key,
-                    "error": str(exc),
-                },
-            )
-
-    await store.finish_run(run_id, results)
+    except Exception as exc:
+        metadata = artifact_writer.metadata() if artifact_writer is not None else {}
+        await store.fail_run(run_id, str(exc), metadata=metadata)
 
 
 def _scorecard_to_dict(sc) -> dict[str, Any]:
@@ -253,7 +383,7 @@ def _scorecard_to_dict(sc) -> dict[str, Any]:
 
 @app.get("/health")
 async def health() -> dict:
-    return {"status": "ok", "version": "0.1.0"}
+    return {"status": "ok", "version": "0.2.0"}
 
 
 @app.post("/runs", response_model=RunCreated, status_code=202)
