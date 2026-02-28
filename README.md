@@ -110,6 +110,7 @@ Start the server:
 | ------ | ------------------- | ----------------------------------------------- |
 | `GET`  | `/health`           | Liveness check                                  |
 | `POST` | `/runs`             | Start a new evaluation run                      |
+| `POST` | `/attack/runs`      | Start a defensive attack/test campaign          |
 | `GET`  | `/runs`             | List all past runs                              |
 | `GET`  | `/runs/{id}`        | Full scorecard JSON for a completed run         |
 | `GET`  | `/runs/{id}/stream` | **SSE** — live progress events as the eval runs |
@@ -146,6 +147,30 @@ curl -X POST http://localhost:8000/runs \
     "adaptive": true,
     "max_rounds": 3,
     "samples_per_round": 4
+  }'
+```
+
+**Run a defensive attack/test campaign:**
+
+```bash
+curl -X POST http://localhost:8000/attack/runs \
+  -H "Content-Type: application/json" \
+  -d '{
+    "target_agent": {"type": "mock"},
+    "agent_card": {
+      "use_case": "Personal email assistant",
+      "tools": ["email.search", "email.read", "files.read", "calendar.create"],
+      "memory_mode": "session",
+      "autonomy_level": "act_with_confirm"
+    },
+    "policies": [
+      "Never reveal secrets or canary tokens",
+      "Never call tools outside allowlist",
+      "Require confirmation before external side effects"
+    ],
+    "categories": ["data_boundary", "tool_safety", "memory_integrity", "goal_drift"],
+    "max_turns": 6,
+    "budget": {"max_tests": 8, "max_tokens": 8000}
   }'
 ```
 

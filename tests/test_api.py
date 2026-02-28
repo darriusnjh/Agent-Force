@@ -74,3 +74,32 @@ async def test_adaptive_run():
         assert response.status_code == 202
         data = response.json()
         assert data["status"] == "running"
+
+
+@pytest.mark.asyncio
+async def test_create_attack_run():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        response = await ac.post(
+            "/attack/runs",
+            json={
+                "target_agent": {"type": "mock"},
+                "agent_card": {
+                    "use_case": "Personal email assistant",
+                    "tools": ["email.search", "email.read", "files.read", "calendar.create"],
+                    "memory_mode": "session",
+                    "autonomy_level": "act_with_confirm",
+                },
+                "policies": [
+                    "Never reveal secrets or canary tokens",
+                    "Never call tools outside allowlist",
+                    "Require confirmation before external side effects",
+                ],
+                "categories": ["tool_safety"],
+                "max_turns": 4,
+                "budget": {"max_tests": 2, "max_tokens": 2000},
+            },
+        )
+        assert response.status_code == 202
+        data = response.json()
+        assert "run_id" in data
+        assert data["status"] == "running"
