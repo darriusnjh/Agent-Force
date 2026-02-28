@@ -29,6 +29,9 @@ def start_run(
     mcp_server_urls: Optional[List[str]] = None,
     mcp_server_command: Optional[str] = None,
     mcp_server_args: Optional[List[str]] = None,
+    custom_http_endpoint: Optional[str] = None,
+    custom_http_auth: Optional[str] = None,
+    custom_http_dataset: Optional[str] = None,
 ) -> str:
     """Triggers a new evaluation run via POST /runs and returns the run_id."""
     payload = {
@@ -53,6 +56,12 @@ def start_run(
         payload["mcp_server_command"] = mcp_server_command
     if mcp_server_args:
         payload["mcp_server_args"] = mcp_server_args
+    if custom_http_endpoint:
+        payload["custom_http_endpoint"] = custom_http_endpoint
+    if custom_http_auth:
+        payload["custom_http_auth"] = custom_http_auth
+    if custom_http_dataset:
+        payload["custom_http_dataset"] = custom_http_dataset
 
     response = requests.post(f"{API_BASE_URL}/runs", json=payload)
     response.raise_for_status()

@@ -104,7 +104,7 @@ class RunRequest(BaseModel):
     """Configuration for a new evaluation run."""
 
     agents: list[str] = ["email", "web_search", "code_exec"]
-    """Which agent(s) to evaluate. Valid: email, web_search, code_exec."""
+    """Which agent(s) to evaluate. Valid: email, web_search, code_exec, jira, custom_http."""
 
     adaptive: bool = False
     """Whether to use the AdaptiveEvalLoop (multi-round generation)."""
@@ -135,6 +135,9 @@ class RunRequest(BaseModel):
     mcp_server_urls: list[str] = Field(default_factory=list)
     mcp_server_command: Optional[str] = None
     mcp_server_args: list[str] = Field(default_factory=list)
+    custom_http_endpoint: Optional[str] = None
+    custom_http_auth: Optional[str] = None
+    custom_http_dataset: Literal["email", "web_search", "code_exec", "jira"] = "email"
 
 
 class RunCreated(BaseModel):
@@ -337,6 +340,100 @@ def _build_world_solver(
     return None
 
 
+def _build_custom_http_solver(
+    *,
+    endpoint: str,
+    auth: Optional[str] = None,
+    on_tool_call: Any | None = None,
+):
+    from safety_kit.types import ToolCall
+
+    async def _solver(state):
+        import httpx
+
+        headers: dict[str, str] = {}
+        if auth:
+            headers["Authorization"] = auth
+
+        payload = {
+            "input": state.input,
+            "messages": state.messages,
+            "metadata": state.metadata,
+            # Also send the attack-kit request shape for compatibility.
+            "user_msg": state.input,
+            "context": {
+                "messages": state.messages,
+                "metadata": state.metadata,
+            },
+        }
+
+        timeout = httpx.Timeout(30.0, connect=10.0)
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            response = await client.post(endpoint, json=payload, headers=headers)
+            response.raise_for_status()
+            try:
+                data = response.json()
+            except Exception:
+                data = {"output": response.text}
+
+        if not isinstance(data, dict):
+            data = {"output": str(data)}
+
+        output = str(
+            data.get("output")
+            or data.get("assistant_text")
+            or data.get("response")
+            or data.get("text")
+            or ""
+        )
+
+        raw_calls = data.get("actions")
+        if not isinstance(raw_calls, list):
+            raw_calls = data.get("tool_calls")
+        if not isinstance(raw_calls, list):
+            raw_calls = []
+
+        actions: list[ToolCall] = []
+        for raw in raw_calls:
+            if not isinstance(raw, dict):
+                continue
+            tool_name = str(raw.get("tool_name") or raw.get("tool") or "unknown_tool")
+            tool_input = raw.get("tool_input") or raw.get("args") or raw.get("input") or {}
+            if not isinstance(tool_input, dict):
+                tool_input = {"value": tool_input}
+            tool_output = raw.get("tool_output")
+            if tool_output is None:
+                tool_output = raw.get("result")
+            if tool_output is None:
+                tool_output = raw.get("output")
+            actions.append(
+                ToolCall(
+                    tool_name=tool_name,
+                    tool_input=tool_input,
+                    tool_output=str(tool_output or ""),
+                )
+            )
+
+        state.output = output
+        state.actions = actions
+        if output:
+            state.messages = list(state.messages) + [{"role": "assistant", "content": output}]
+
+        response_metadata = data.get("metadata")
+        if isinstance(response_metadata, dict):
+            state.metadata.update(response_metadata)
+
+        if on_tool_call is not None:
+            for call in actions:
+                maybe = on_tool_call(call, state)
+                if asyncio.iscoroutine(maybe):
+                    await maybe
+
+        return state
+
+    return _solver
+
+
 def _normalise_mcp_command_args(args: Optional[list[str]]) -> list[str]:
     if not args:
         return []
@@ -444,13 +541,32 @@ async def _run_evaluation(run_id: str, req: RunRequest) -> None:
         fallback_used = False
 
         for key in req.agents:
-            if key not in registry:
-                continue
+            dataset_key = key
+            agent_label = key
+            if key == "custom_http":
+                dataset_key = req.custom_http_dataset
+                if dataset_key not in registry:
+                    await store.append_event(
+                        run_id,
+                        {
+                            "type": "agent_error",
+                            "agent": "custom_http",
+                            "error": f"Unknown custom_http_dataset: {dataset_key}",
+                        },
+                    )
+                    continue
+                cfg = dict(registry[dataset_key])
+                cfg["name"] = f"Custom HTTP Agent Safety ({dataset_key})"
+                cfg["agent_type"] = (
+                    f"custom http agent evaluated with {dataset_key} scenario profile"
+                )
+            else:
+                if key not in registry:
+                    continue
+                cfg = registry[key]
 
-            cfg = registry[key]
             sandbox = None
             solver = None
-            agent_label = key
 
             async def on_tool_call(tool_call, state, agent_name=agent_label):
                 await store.append_event(
@@ -472,7 +588,20 @@ async def _run_evaluation(run_id: str, req: RunRequest) -> None:
                 event_payload["agent"] = agent_name
                 await store.append_event(run_id, event_payload)
 
-            if req.sandbox_mode == "world_stateful":
+            if key == "custom_http" and req.sandbox_mode == "world_stateful":
+                await store.append_event(
+                    run_id,
+                    {
+                        "type": "custom_http_notice",
+                        "agent": agent_label,
+                        "message": (
+                            "custom_http runs without world sandbox tools; "
+                            "using direct endpoint calls."
+                        ),
+                    },
+                )
+
+            if key != "custom_http" and req.sandbox_mode == "world_stateful":
                 sandbox = StatefulWorldSandbox(
                     world_pack=req.world_pack,
                     demo_mode=req.demo_mode,
@@ -504,19 +633,26 @@ async def _run_evaluation(run_id: str, req: RunRequest) -> None:
                     solver = _noop_agent
 
             if solver is None:
-                builder_kwargs: dict[str, Any] = {
-                    "model": agent_model,
-                    "on_tool_call": on_tool_call,
-                }
-                if req.mcp_server_urls:
-                    builder_kwargs["mcp_server_urls"] = req.mcp_server_urls
-                if req.mcp_server_command:
-                    builder_kwargs["mcp_server_command"] = req.mcp_server_command
-                if req.mcp_server_args:
-                    builder_kwargs["mcp_server_args"] = _normalise_mcp_command_args(
-                        req.mcp_server_args
+                if key == "custom_http":
+                    solver = _build_custom_http_solver(
+                        endpoint=(req.custom_http_endpoint or "").strip(),
+                        auth=(req.custom_http_auth or "").strip() or None,
+                        on_tool_call=on_tool_call,
                     )
-                solver = cfg["builder"](**builder_kwargs)
+                else:
+                    builder_kwargs: dict[str, Any] = {
+                        "model": agent_model,
+                        "on_tool_call": on_tool_call,
+                    }
+                    if req.mcp_server_urls:
+                        builder_kwargs["mcp_server_urls"] = req.mcp_server_urls
+                    if req.mcp_server_command:
+                        builder_kwargs["mcp_server_command"] = req.mcp_server_command
+                    if req.mcp_server_args:
+                        builder_kwargs["mcp_server_args"] = _normalise_mcp_command_args(
+                            req.mcp_server_args
+                        )
+                    solver = cfg["builder"](**builder_kwargs)
 
             task = Task(
                 name=cfg["name"],
@@ -568,7 +704,7 @@ async def _run_evaluation(run_id: str, req: RunRequest) -> None:
                     report = sample_row.get("vulnerability_report", {}) or {}
                     if bool(report.get("detected", False)):
                         vuln = {
-                            "agent": key,
+                            "agent": agent_label,
                             "category": sample_row.get("category", "general"),
                             "input": str(sample_row.get("input", ""))[:260],
                             "first_violation_turn": report.get("first_violation_turn"),
@@ -582,14 +718,14 @@ async def _run_evaluation(run_id: str, req: RunRequest) -> None:
                         run_id,
                         {
                             "type": "adversarial_vulnerabilities",
-                            "agent": key,
+                            "agent": agent_label,
                             "count": len(agent_vulns),
                             "samples": agent_vulns[:5],
                         },
                     )
                 results.append(
                     {
-                        "agent": key,
+                        "agent": agent_label,
                         "scorecard": scorecard_dict,
                     }
                 )
@@ -598,16 +734,16 @@ async def _run_evaluation(run_id: str, req: RunRequest) -> None:
                     sandbox_artifacts = sandbox.collect_artifacts()
                     artifact_writer.append_trace_entries(sandbox_artifacts["trace"])
                     aggregate_rule_hits.extend(
-                        [{**item, "agent": key} for item in sandbox_artifacts["rule_hits"]]
+                        [{**item, "agent": agent_label} for item in sandbox_artifacts["rule_hits"]]
                     )
                     aggregate_confirmed.extend(
-                        [{**item, "agent": key} for item in sandbox_artifacts["confirmed"]]
+                        [{**item, "agent": agent_label} for item in sandbox_artifacts["confirmed"]]
                     )
                     aggregate_rejected.extend(
-                        [{**item, "agent": key} for item in sandbox_artifacts["rule_hit_llm_reject"]]
+                        [{**item, "agent": agent_label} for item in sandbox_artifacts["rule_hit_llm_reject"]]
                     )
                     aggregate_rule_miss.extend(
-                        [{**item, "agent": key} for item in sandbox_artifacts["llm_hit_rule_miss"]]
+                        [{**item, "agent": agent_label} for item in sandbox_artifacts["llm_hit_rule_miss"]]
                     )
                     fallback_used = fallback_used or sandbox_artifacts["fallback_used"]
 
@@ -615,7 +751,7 @@ async def _run_evaluation(run_id: str, req: RunRequest) -> None:
                     run_id,
                     {
                         "type": "agent_complete",
-                        "agent": key,
+                        "agent": agent_label,
                         "score": scorecard.overall_score,
                         "level": scorecard.overall_level.value,
                     },
@@ -626,7 +762,7 @@ async def _run_evaluation(run_id: str, req: RunRequest) -> None:
                     run_id,
                     {
                         "type": "agent_error",
-                        "agent": key,
+                        "agent": agent_label,
                         "error": str(exc),
                     },
                 )
@@ -660,6 +796,8 @@ async def _run_evaluation(run_id: str, req: RunRequest) -> None:
             "mcp_server_url_count": len(req.mcp_server_urls),
             "mcp_server_command": req.mcp_server_command,
             "mcp_server_arg_count": len(req.mcp_server_args),
+            "custom_http_endpoint": (req.custom_http_endpoint or "").strip() or None,
+            "custom_http_dataset": req.custom_http_dataset,
             "adversarial_adaptive": req.adversarial_adaptive,
             "adversarial_max_turns": req.adversarial_max_turns,
             "adversarial_stop_on_violation": req.adversarial_stop_on_violation,
@@ -688,6 +826,8 @@ async def _run_evaluation(run_id: str, req: RunRequest) -> None:
                 "mcp_server_urls": req.mcp_server_urls,
                 "mcp_server_command": req.mcp_server_command,
                 "mcp_server_args": _normalise_mcp_command_args(req.mcp_server_args),
+                "custom_http_endpoint": (req.custom_http_endpoint or "").strip() or None,
+                "custom_http_dataset": req.custom_http_dataset,
                 "adversarial_adaptive": req.adversarial_adaptive,
                 "adversarial_max_turns": req.adversarial_max_turns,
                 "adversarial_stop_on_violation": req.adversarial_stop_on_violation,
@@ -858,10 +998,15 @@ async def health() -> dict:
 async def create_run(req: RunRequest) -> RunCreated:
     """Start a new safety evaluation run. Returns immediately with a run_id."""
 
-    valid_agents = {"email", "web_search", "code_exec", "jira"}
+    valid_agents = {"email", "web_search", "code_exec", "jira", "custom_http"}
     bad = [a for a in req.agents if a not in valid_agents]
     if bad:
         raise HTTPException(400, f"Unknown agent(s): {bad}. Valid: {sorted(valid_agents)}")
+    if "custom_http" in req.agents and not (req.custom_http_endpoint or "").strip():
+        raise HTTPException(
+            400,
+            "custom_http_endpoint is required when agents includes 'custom_http'",
+        )
     if req.adversarial_max_turns < 1 or req.adversarial_max_turns > 20:
         raise HTTPException(400, "adversarial_max_turns must be between 1 and 20")
 

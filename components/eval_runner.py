@@ -80,6 +80,9 @@ def render_agent_info(config: dict):
         ("Mode",          "Adaptive" if config.get("adaptive") else "Standard"),
         ("Epochs",        str(config.get("epochs", 1))),
     ]
+    if config.get("agent") == "custom_http":
+        rows.append(("HTTP Endpoint", str(config.get("custom_http_endpoint", "-"))[:42]))
+        rows.append(("Scenario Profile", config.get("custom_http_dataset", "email")))
     rows_html = "".join([
         f'<div style="display:flex;justify-content:space-between;'
         f'padding:7px 0;border-bottom:1px solid {COLORS["border"]};">'
