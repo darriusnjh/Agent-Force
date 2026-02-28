@@ -20,6 +20,7 @@ def start_run(
     agent_model: str = None, 
     scorer_model: str = None,
     adaptive_model: str = None,
+    sandbox_mode: str = "world_stateful",
     samples_per_round: int = 4,
     max_rounds: int = 3,
     adversarial_adaptive: bool = False,
@@ -37,6 +38,7 @@ def start_run(
     payload = {
         "agents": agents,
         "adaptive": adaptive,
+        "sandbox_mode": sandbox_mode,
         "samples_per_round": samples_per_round,
         "max_rounds": max_rounds,
         "adversarial_adaptive": adversarial_adaptive,

@@ -352,7 +352,7 @@ with tab_standard:
         help="Displayed for run planning. Current backend uses one execution pass.",
     )
 
-    cfg9, cfg10, cfg11 = st.columns(3)
+    cfg9, cfg10, cfg11, cfg12 = st.columns(4)
     with cfg9:
         std_adversarial_adaptive = st.toggle(
             "Adversarial Adaptive Mode",
@@ -382,12 +382,24 @@ with tab_standard:
             key="std_adversarial_stop_on_violation",
             help="Stop the attacker-target interaction as soon as a violation is detected.",
         )
+    with cfg12:
+        std_enable_sandbox = st.toggle(
+            "Enable Sandbox",
+            value=True,
+            key="std_enable_sandbox",
+            help=(
+                "Enable world sandbox context. Disable to run with sandbox_mode='none' "
+                "and use agent-only email scenario generation."
+            ),
+        )
+    std_sandbox_mode = "world_stateful" if std_enable_sandbox else "none"
 
     st.markdown("</div>", unsafe_allow_html=True)
     std_config = {
         "agent": std_agent,
         "agent_model": std_agent_model,
         "scorer_model": std_scorer_model,
+        "sandbox_mode": std_sandbox_mode,
         "custom_http_endpoint": std_custom_http_endpoint,
         "custom_http_auth": std_custom_http_auth,
         "custom_http_dataset": std_custom_http_dataset,
@@ -503,6 +515,7 @@ with tab_standard:
                         adaptive=std_config.get("adaptive", False) or adaptive_run,
                         agent_model=std_config.get("agent_model"),
                         scorer_model=std_config.get("scorer_model"),
+                        sandbox_mode=std_config.get("sandbox_mode", "world_stateful"),
                         max_rounds=std_config.get("max_rounds", 3),
                         samples_per_round=std_config.get("samples_per_round", 4),
                         adversarial_adaptive=bool(std_config.get("adversarial_adaptive", False)),

@@ -72,11 +72,13 @@ def render_live_log(log_lines: list[str]):
 
 def render_agent_info(config: dict):
     """Renders the agent config info box."""
+    sandbox_mode = str(config.get("sandbox_mode", "world_stateful"))
+    sandbox_label = "WorldSandbox" if sandbox_mode == "world_stateful" else "Disabled (none)"
     rows = [
         ("Agent Type",    config.get("agent", "email")),
         ("Agent Model",   config.get("agent_model", "gpt-4o-mini")),
         ("Judge Model",   config.get("scorer_model", "gpt-4o")),
-        ("Sandbox",       "LocalSandbox"),
+        ("Sandbox",       sandbox_label),
         ("Mode",          "Adaptive" if config.get("adaptive") else "Standard"),
         ("Epochs",        str(config.get("epochs", 1))),
     ]
