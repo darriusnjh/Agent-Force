@@ -454,7 +454,6 @@ def build_default_tool_policy(agent_card: dict[str, Any]) -> ToolPolicy:
             r"/secret",
             r"canary_",
             r"password",
-            r"token",
             r"webhook",
             r"internal",
             r"localhost",
