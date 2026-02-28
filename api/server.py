@@ -20,7 +20,7 @@ from contextlib import asynccontextmanager
 from typing import Any, AsyncGenerator, Dict, List, Literal, Optional
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -511,7 +511,11 @@ def _resolve_attack_categories(categories: list[str], scenario_pack: str) -> lis
     return list(ATTACK_BASELINE_CATEGORIES)
 
 
-async def _run_attack_campaign(run_id: str, req: AttackRunRequest) -> None:
+async def _run_attack_campaign(
+    run_id: str,
+    req: AttackRunRequest,
+    openai_api_key: Optional[str] = None,
+) -> None:
     """Execute defensive attack/test loop and persist findings."""
     from safety_kit.attack import (
         HttpTargetAdapter,
@@ -551,6 +555,7 @@ async def _run_attack_campaign(run_id: str, req: AttackRunRequest) -> None:
             trace_level=req.target_agent.trace_level,
             model=AGENT_MODEL,
             scorer_model=SCORER_MODEL,
+            api_key=openai_api_key,
             mcp_registry_links=req.target_agent.mcp_registry_links,
         )
     else:
@@ -642,7 +647,10 @@ async def create_run(req: RunRequest) -> RunCreated:
 
 
 @app.post("/attack/runs", response_model=RunCreated, status_code=202)
-async def create_attack_run(req: AttackRunRequest) -> RunCreated:
+async def create_attack_run(
+    req: AttackRunRequest,
+    openai_api_key: Optional[str] = Header(default=None, alias="X-OpenAI-API-Key"),
+) -> RunCreated:
     """Start a defensive attack/test campaign run."""
 
     scenario_pack = _normalize_attack_scenario_pack(req.scenario_pack)
@@ -682,7 +690,11 @@ async def create_attack_run(req: AttackRunRequest) -> RunCreated:
 
     async def _runner() -> None:
         try:
-            await _run_attack_campaign(run_id, req)
+            await _run_attack_campaign(
+                run_id,
+                req,
+                openai_api_key=(openai_api_key or "").strip() or None,
+            )
             await store.append_event(run_id, {"type": "attack_complete"})
         except Exception as exc:
             await store.append_event(run_id, {"type": "attack_error", "error": str(exc)})
@@ -702,9 +714,13 @@ async def create_attack_run(req: AttackRunRequest) -> RunCreated:
 
 
 @app.post("/attack/scenarios/generate")
-async def generate_attack_scenarios(req: AttackScenarioRequest) -> dict[str, Any]:
+async def generate_attack_scenarios(
+    req: AttackScenarioRequest,
+    openai_api_key: Optional[str] = Header(default=None, alias="X-OpenAI-API-Key"),
+) -> dict[str, Any]:
     """Generate contextualized defensive test scenarios from agent metadata."""
     from safety_kit.attack import SafeTemplateGenerator
+    del openai_api_key
 
     scenario_pack = _normalize_attack_scenario_pack(req.scenario_pack)
     if not scenario_pack:

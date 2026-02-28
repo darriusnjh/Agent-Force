@@ -344,13 +344,47 @@ with tab_attack:
         unsafe_allow_html=True,
     )
 
-    key_ready = bool(os.getenv("OPENAI_API_KEY", "").strip())
-    if not key_ready:
-        st.warning("Set `OPENAI_API_KEY` in your `.env` to enable attack-kit actions.")
+    env_openai_key = os.getenv("OPENAI_API_KEY", "").strip()
+    if "attack_openai_api_key" not in st.session_state:
+        st.session_state["attack_openai_api_key"] = ""
+
+    frontend_openai_key = st.text_input(
+        "OpenAI API Key",
+        key="attack_openai_api_key",
+        type="password",
+        help=(
+            "Optional override for this session. Leave empty to use `OPENAI_API_KEY` from the backend/frontend "
+            "environment."
+        ),
+    )
+    effective_openai_key = (frontend_openai_key or "").strip() or env_openai_key
+    key_ready = bool(effective_openai_key)
+    if key_ready and (frontend_openai_key or "").strip():
+        st.info("Using OpenAI API key from frontend input for attack-kit actions.")
+    elif key_ready:
+        st.info("Using `OPENAI_API_KEY` from environment for attack-kit actions.")
     else:
-        st.info("`OPENAI_API_KEY` detected from environment. Attack-kit actions are enabled.")
+        st.warning("Provide an OpenAI API key in this field or set `OPENAI_API_KEY` in `.env`.")
     if not alive:
         st.warning("Backend API is offline. Attack-kit actions require the API server.")
+
+    with st.expander("Attack Kit configuration guide", expanded=False):
+        st.markdown(
+            """
+**Scenario Family**
+- `Baseline Coverage`: broad checks across policy, memory, tool, and autonomy controls.
+- `Resilience Stress`: higher pressure on compaction, stop-channel, confirmation, and batching failure modes.
+
+**Execution Controls**
+- `Max Turns`: limits the depth of each scenario conversation.
+- `Max Tests`: caps number of scenarios executed in one campaign.
+- `Scenarios per Category`: controls preview diversity per selected risk category.
+
+**Safety Controls**
+- `Operation Mode`: `shadow` simulates destructive actions for impact reporting; `safe` blocks directly.
+- `Max Privilege`: highest tool privilege the target is expected to use in sandbox.
+"""
+        )
 
     default_tools = {
         "email": "email.search,email.read,email.archive,email.delete,files.read",
@@ -372,16 +406,22 @@ with tab_attack:
 
     c1, c2 = st.columns([1.4, 1])
     with c1:
-        use_case = st.text_input("Use Case", key="attack_use_case")
+        use_case = st.text_input(
+            "Use Case",
+            key="attack_use_case",
+            help="Describe the target agent's job; this conditions scenario generation and policy checks.",
+        )
         tools_input = st.text_area(
             "Tools (comma separated)",
             key="attack_tools_input",
             height=90,
+            help="Declared tool names used to generate boundary tests, approval-gate tests, and privilege checks.",
         )
         policy_input = st.text_area(
             "Policies (one per line)",
             key="attack_policies",
             height=100,
+            help="Hard constraints the attack kit should enforce and verify during sandbox execution.",
         )
         selected_categories = st.multiselect(
             "Risk Categories",
@@ -393,6 +433,7 @@ with tab_attack:
                 "batching_runaway",
                 "privilege_escalation",
             ],
+            help="Failure classes to probe. Select more for wider coverage, fewer for focused validation.",
         )
 
     with c2:
@@ -400,18 +441,59 @@ with tab_attack:
             "Scenario Family",
             ["Baseline Coverage", "Resilience Stress"],
             index=1,
+            help="Choose broad baseline checks or stress-heavy scenarios that pressure control reliability.",
         )
         scenario_pack = (
             "resilience_stress" if scenario_pack_label == "Resilience Stress" else "baseline_coverage"
         )
-        sandbox_agent = st.selectbox("Sandbox Agent Profile", ["email", "web_search", "code_exec"])
-        autonomy_level = st.selectbox("Autonomy Level", ["suggest", "act_with_confirm", "act"], index=1)
-        memory_mode = st.selectbox("Memory Mode", ["session", "persistent", "none"])
-        max_privilege = st.selectbox("Max Privilege", ["user", "elevated", "admin", "system"], index=1)
-        operation_mode = st.selectbox("Operation Mode", ["shadow", "safe"])
-        max_turns = st.slider("Max Turns", 2, 12, 6)
-        max_tests = st.slider("Max Tests", 1, 20, 6)
-        per_category = st.slider("Scenarios per Category", 1, 4, 2)
+        sandbox_agent = st.selectbox(
+            "Sandbox Agent Profile",
+            ["email", "web_search", "code_exec"],
+            help="Select the synthetic target behavior profile used by sandbox tooling and traces.",
+        )
+        autonomy_level = st.selectbox(
+            "Autonomy Level",
+            ["suggest", "act_with_confirm", "act"],
+            index=1,
+            help="Expected operating autonomy. Higher autonomy increases direct-action stress tests.",
+        )
+        memory_mode = st.selectbox(
+            "Memory Mode",
+            ["session", "persistent", "none"],
+            help="Defines whether instruction-retention and memory-poisoning scenarios are included.",
+        )
+        max_privilege = st.selectbox(
+            "Max Privilege",
+            ["user", "elevated", "admin", "system"],
+            index=1,
+            help="Highest privilege tier the target should access; violations above this are flagged.",
+        )
+        operation_mode = st.selectbox(
+            "Operation Mode",
+            ["shadow", "safe"],
+            help="`shadow` records would-have-happened impact; `safe` hard-blocks destructive actions.",
+        )
+        max_turns = st.slider(
+            "Max Turns",
+            2,
+            12,
+            6,
+            help="Upper bound on turns per generated scenario script.",
+        )
+        max_tests = st.slider(
+            "Max Tests",
+            1,
+            20,
+            6,
+            help="Upper bound on total scenario executions for this campaign run.",
+        )
+        per_category = st.slider(
+            "Scenarios per Category",
+            1,
+            4,
+            2,
+            help="How many preview scenarios to generate for each selected category.",
+        )
 
     tools = _parse_csv_items(tools_input)
     policies = [line.strip() for line in policy_input.splitlines() if line.strip()]
@@ -435,12 +517,14 @@ with tab_attack:
             "GENERATE DYNAMIC SCENARIOS",
             use_container_width=True,
             disabled=not (alive and key_ready),
+            help="Builds contextualized sandbox test scripts from your agent card and selected categories.",
         )
     with btn2:
         run_attack_clicked = st.button(
             "RUN ATTACK CAMPAIGN",
             use_container_width=True,
             disabled=not (alive and key_ready),
+            help="Executes the generated campaign in sandbox, then reports findings, severity, and guardrail gaps.",
         )
 
     if generate_clicked:
@@ -454,6 +538,7 @@ with tab_attack:
                     max_turns=max_turns,
                     per_category=per_category,
                     inbox={"toy_count": 10, "realistic_count": 5000, "canary_count": 5},
+                    openai_api_key=effective_openai_key,
                 )
                 st.session_state["attack_scenarios_preview"] = scenarios_preview
                 status_box.update(label=f"Generated {len(scenarios_preview)} scenarios.", state="complete")
@@ -498,6 +583,7 @@ with tab_attack:
                         "top_k_memory": 3,
                         "ab_replay_every": 0,
                     },
+                    openai_api_key=effective_openai_key,
                 )
                 st.session_state["last_attack_run_id"] = run_id
                 st.session_state["last_run_id"] = run_id

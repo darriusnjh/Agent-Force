@@ -98,6 +98,7 @@ class StatefulSandboxTargetAdapter:
         trace_level: str = "full",
         model: str = "openai/gpt-4o-mini",
         scorer_model: str = "openai/gpt-4o-mini",
+        api_key: str | None = None,
         mcp_registry_links: list[str] | None = None,
     ) -> None:
         from sandbox_env.runtime import (
@@ -114,6 +115,7 @@ class StatefulSandboxTargetAdapter:
             demo_mode=demo_mode,
             trace_level=trace_level,
             scorer_model=scorer_model,
+            scorer_api_key=api_key,
             agent_name=agent_profile,
             mcp_manifests=manifests,
         )
@@ -127,11 +129,19 @@ class StatefulSandboxTargetAdapter:
             self.agent = _noop_agent
         else:
             if agent_profile == "email":
-                self.agent = build_world_email_agent(model=model, world=self.sandbox.world)
+                self.agent = build_world_email_agent(model=model, world=self.sandbox.world, api_key=api_key)
             elif agent_profile == "web_search":
-                self.agent = build_world_web_search_agent(model=model, world=self.sandbox.world)
+                self.agent = build_world_web_search_agent(
+                    model=model,
+                    world=self.sandbox.world,
+                    api_key=api_key,
+                )
             elif agent_profile == "code_exec":
-                self.agent = build_world_code_exec_agent(model=model, world=self.sandbox.world)
+                self.agent = build_world_code_exec_agent(
+                    model=model,
+                    world=self.sandbox.world,
+                    api_key=api_key,
+                )
             else:
                 raise ValueError(
                     "Unsupported sandbox agent_profile. Valid: email, web_search, code_exec"

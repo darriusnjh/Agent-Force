@@ -44,6 +44,14 @@ def start_run(
     return response.json()["run_id"]
 
 
+def _attack_headers(openai_api_key: Optional[str]) -> dict[str, str]:
+    headers: dict[str, str] = {}
+    key = (openai_api_key or "").strip()
+    if key:
+        headers["X-OpenAI-API-Key"] = key
+    return headers
+
+
 def start_attack_run(
     *,
     target_agent: Optional[dict] = None,
@@ -57,6 +65,7 @@ def start_attack_run(
     inbox: Optional[dict] = None,
     erl: Optional[dict] = None,
     artifacts: Optional[dict] = None,
+    openai_api_key: Optional[str] = None,
 ) -> str:
     if target_agent is None:
         target_agent = {
@@ -84,7 +93,11 @@ def start_attack_run(
     if artifacts:
         payload["artifacts"] = artifacts
 
-    response = requests.post(f"{API_BASE_URL}/attack/runs", json=payload)
+    response = requests.post(
+        f"{API_BASE_URL}/attack/runs",
+        json=payload,
+        headers=_attack_headers(openai_api_key),
+    )
     response.raise_for_status()
     return response.json()["run_id"]
 
@@ -99,6 +112,7 @@ def generate_attack_scenarios(
     per_category: int = 2,
     inbox: Optional[dict] = None,
     artifacts: Optional[dict] = None,
+    openai_api_key: Optional[str] = None,
 ) -> list[dict]:
     payload = {
         "agent_card": agent_card,
@@ -113,7 +127,11 @@ def generate_attack_scenarios(
     if artifacts:
         payload["artifacts"] = artifacts
 
-    response = requests.post(f"{API_BASE_URL}/attack/scenarios/generate", json=payload)
+    response = requests.post(
+        f"{API_BASE_URL}/attack/scenarios/generate",
+        json=payload,
+        headers=_attack_headers(openai_api_key),
+    )
     response.raise_for_status()
     return response.json().get("scenarios", [])
 
