@@ -457,28 +457,10 @@ with tab_attack:
 - `Max Privilege`: highest tool privilege the target is expected to use in sandbox.
 """
         )
-    with st.expander("Available Sandbox Profiles and Tools", expanded=False):
-        profile_rows = []
-        for profile_name, description in SANDBOX_PROFILE_DESCRIPTIONS.items():
-            tools_preview = SANDBOX_PROFILE_TOOL_CATALOG.get(profile_name, [])
-            profile_rows.append(
-                {
-                    "profile": profile_name,
-                    "description": description,
-                    "example_tools": ", ".join(tools_preview[:6]),
-                }
-            )
-        st.dataframe(profile_rows, hide_index=True, use_container_width=True)
-
-    default_tools = {
-        "email": "email.search,email.read,email.archive,email.delete,files.read",
-        "web_search": "web_search,browse_page,summarise_text",
-        "code_exec": "run_python,list_files,read_file",
-        "custom": "files.read,email.read,email.archive,email.delete",
-    }
+    
     default_agent = config.get("agent", "email")
-    if "attack_tools_input" not in st.session_state:
-        st.session_state["attack_tools_input"] = default_tools.get(default_agent, default_tools["custom"])
+    if default_agent not in SANDBOX_PROFILE_TOOL_CATALOG:
+        default_agent = "email"
     if "attack_use_case" not in st.session_state:
         st.session_state["attack_use_case"] = "Personal email assistant"
     if "attack_policies" not in st.session_state:
@@ -487,39 +469,18 @@ with tab_attack:
             "Never call tools outside allowlist\n"
             "Require confirmation before external side effects"
         )
+    if "attack_sandbox_agent" not in st.session_state:
+        st.session_state["attack_sandbox_agent"] = default_agent
+    if "attack_sandbox_profile" not in st.session_state:
+        st.session_state["attack_sandbox_profile"] = "auto"
+    if "attack_selected_tools" not in st.session_state:
+        st.session_state["attack_selected_tools"] = list(
+            SANDBOX_PROFILE_TOOL_CATALOG.get(default_agent, SANDBOX_PROFILE_TOOL_CATALOG["generic"])
+        )
+    if "attack_custom_tools_input" not in st.session_state:
+        st.session_state["attack_custom_tools_input"] = ""
 
     c1, c2 = st.columns([1.4, 1])
-    with c1:
-        use_case = st.text_input(
-            "Use Case",
-            key="attack_use_case",
-            help="Describe the target agent's job; this conditions scenario generation and policy checks.",
-        )
-        tools_input = st.text_area(
-            "Tools (comma separated)",
-            key="attack_tools_input",
-            height=90,
-            help="Declared tool names used to generate boundary tests, approval-gate tests, and privilege checks.",
-        )
-        policy_input = st.text_area(
-            "Policies (one per line)",
-            key="attack_policies",
-            height=100,
-            help="Hard constraints the attack kit should enforce and verify during sandbox execution.",
-        )
-        selected_categories = st.multiselect(
-            "Risk Categories",
-            ATTACK_CATEGORIES,
-            default=[
-                "context_compaction_failure",
-                "confirmation_gate_failure",
-                "stop_failsafe_failure",
-                "batching_runaway",
-                "privilege_escalation",
-            ],
-            help="Failure classes to probe. Select more for wider coverage, fewer for focused validation.",
-        )
-
     with c2:
         scenario_pack_label = st.selectbox(
             "Scenario Family",
@@ -533,6 +494,7 @@ with tab_attack:
         sandbox_agent = st.selectbox(
             "Sandbox Agent Profile",
             ["email", "web_search", "code_exec"],
+            key="attack_sandbox_agent",
             help="Select the synthetic target behavior profile used by sandbox tooling and traces.",
         )
         autonomy_level = st.selectbox(
@@ -561,6 +523,7 @@ with tab_attack:
             "Sandbox Data Profile",
             ["auto", "email", "web_search", "code_exec", "finance_ops", "customer_support", "devops_incident", "generic"],
             index=0,
+            key="attack_sandbox_profile",
             help="Select which synthetic environment artifacts are loaded for scenario execution.",
         )
         st.caption(SANDBOX_PROFILE_DESCRIPTIONS.get(sandbox_profile, "Synthetic sandbox profile"))
@@ -589,49 +552,62 @@ with tab_attack:
     profile_for_tools = sandbox_profile
     if profile_for_tools == "auto":
         profile_for_tools = sandbox_agent if sandbox_agent in SANDBOX_PROFILE_TOOL_CATALOG else "generic"
-    recommended_tools = SANDBOX_PROFILE_TOOL_CATALOG.get(profile_for_tools, SANDBOX_PROFILE_TOOL_CATALOG["generic"])
-    typed_tools = _parse_csv_items(tools_input)
+    recommended_tools = list(
+        SANDBOX_PROFILE_TOOL_CATALOG.get(profile_for_tools, SANDBOX_PROFILE_TOOL_CATALOG["generic"])
+    )
+    custom_tool_tokens = _parse_csv_items(st.session_state.get("attack_custom_tools_input", ""))
+    option_tools = sorted(set([*recommended_tools, *custom_tool_tokens, *st.session_state.get("attack_selected_tools", [])]))
+    persisted_selected = [
+        str(tool).strip()
+        for tool in st.session_state.get("attack_selected_tools", [])
+        if str(tool).strip() in option_tools
+    ]
+    if not persisted_selected:
+        persisted_selected = recommended_tools
 
-    option_tools = sorted(set([*recommended_tools, *typed_tools]))
-    if "attack_tool_selector" not in st.session_state:
-        st.session_state["attack_tool_selector"] = typed_tools or recommended_tools
-    else:
-        selected = [
-            tool for tool in st.session_state.get("attack_tool_selector", []) if tool in option_tools
-        ]
-        if not selected:
-            selected = typed_tools or recommended_tools
-        st.session_state["attack_tool_selector"] = selected
-    if "attack_tool_source" not in st.session_state:
-        st.session_state["attack_tool_source"] = "Tool Selector (Recommended)"
+    with c1:
+        use_case = st.text_input(
+            "Use Case",
+            key="attack_use_case",
+            help="Describe the target agent's job; this conditions scenario generation and policy checks.",
+        )
+        selected_tools = st.multiselect(
+            "Tools",
+            options=option_tools,
+            default=persisted_selected,
+            key="attack_selected_tools",
+            help="Pick tool names to test against this profile (policy boundaries, approval gates, and privilege checks).",
+        )
+        st.text_input(
+            "Add Custom Tools (optional, comma separated)",
+            key="attack_custom_tools_input",
+            help="Add extra tool names, then select them in the Tools picker above.",
+        )
+        policy_input = st.text_area(
+            "Policies (one per line)",
+            key="attack_policies",
+            height=100,
+            help="Hard constraints the attack kit should enforce and verify during sandbox execution.",
+        )
+        selected_categories = st.multiselect(
+            "Risk Categories",
+            ATTACK_CATEGORIES,
+            default=[
+                "context_compaction_failure",
+                "confirmation_gate_failure",
+                "stop_failsafe_failure",
+                "batching_runaway",
+                "privilege_escalation",
+            ],
+            help="Failure classes to probe. Select more for wider coverage, fewer for focused validation.",
+        )
+        st.caption(
+            "Tools are profile-aware. Testing tip: click Generate Dynamic Scenarios and confirm selected tools appear in preview scripts."
+        )
 
-    _render_panel("TOOL SELECTION", "rgba(0,212,255,0.18)")
-    st.caption(
-        "Pick tools directly from the selected sandbox profile. "
-        "Use manual text only if your tool names differ."
-    )
-    st.multiselect(
-        "Profile Tool Selector",
-        options=option_tools,
-        key="attack_tool_selector",
-        help="Selected tools are used to generate boundary, approval, privilege, and memory safety tests.",
-    )
-    st.radio(
-        "Tool Input Source",
-        ["Tool Selector (Recommended)", "Manual Text Input"],
-        key="attack_tool_source",
-        horizontal=True,
-        help="Choose whether scenarios should use selected profile tools or the manual text list.",
-    )
-    st.caption(
-        "Testing tip: click 'Generate Dynamic Scenarios' and verify selected tools appear in the preview scripts."
-    )
-    st.markdown("</div>", unsafe_allow_html=True)
-
-    if st.session_state.get("attack_tool_source") == "Manual Text Input":
-        tools = typed_tools
-    else:
-        tools = [str(tool).strip() for tool in st.session_state.get("attack_tool_selector", []) if str(tool).strip()]
+    tools = [str(tool).strip() for tool in selected_tools if str(tool).strip()]
+    if not tools:
+        tools = recommended_tools
 
     policies = [line.strip() for line in policy_input.splitlines() if line.strip()]
     tool_specs = _build_tool_specs(tools)
