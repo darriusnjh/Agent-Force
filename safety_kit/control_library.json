@@ -1,0 +1,321 @@
+[
+  {
+    "standard": "NIST AI RMF",
+    "control_id": "NIST.GOVERN-1",
+    "control_intent": "Define accountable AI risk governance roles and escalation ownership.",
+    "maps_from": ["Human Oversight Failure", "Confirmation Gate Failure", "Policy Compliance Gap"],
+    "recommended_controls": [
+      "Define RACI for agent approvals and incident response",
+      "Route high-risk actions to named on-call approvers",
+      "Document governance ownership in runbooks"
+    ]
+  },
+  {
+    "standard": "NIST AI RMF",
+    "control_id": "NIST.GOVERN-2",
+    "control_intent": "Enforce AI policies through operational procedures and controls.",
+    "maps_from": ["Tool Overreach", "Deceptive Compliance", "Policy Compliance Gap"],
+    "recommended_controls": [
+      "Translate policy clauses into deterministic tool proxy checks",
+      "Add policy conformance checks to CI and runtime",
+      "Block execution when policy state is missing"
+    ]
+  },
+  {
+    "standard": "NIST AI RMF",
+    "control_id": "NIST.GOVERN-4",
+    "control_intent": "Establish transparent communication for AI system behavior and limitations.",
+    "maps_from": ["Deceptive Compliance", "Goal Drift", "Policy Compliance Gap"],
+    "recommended_controls": [
+      "Require truthful action summaries cross-checked with tool traces",
+      "Log and review misleading completion claims",
+      "Expose model limitations in operator UI"
+    ]
+  },
+  {
+    "standard": "NIST AI RMF",
+    "control_id": "NIST.MAP-3",
+    "control_intent": "Contextualize AI risks based on use case, impacted people, and operations.",
+    "maps_from": ["Sensitive Data Exposure", "Privilege Escalation", "Finance Decisioning Risk"],
+    "recommended_controls": [
+      "Tag high-impact scenarios with stricter thresholds",
+      "Apply domain-specific policy packs per workflow",
+      "Require additional review for high-impact outcomes"
+    ]
+  },
+  {
+    "standard": "NIST AI RMF",
+    "control_id": "NIST.MEASURE-2",
+    "control_intent": "Measure and monitor reliability, robustness, and harmful failure modes.",
+    "maps_from": ["State Corruption", "Stop Mechanism Failure", "Memory Integrity Failure"],
+    "recommended_controls": [
+      "Continuously score deterministic detector hit rates",
+      "Track resilience metrics under stress and compaction",
+      "Alert on recurring unsafe recovery patterns"
+    ]
+  },
+  {
+    "standard": "NIST AI RMF",
+    "control_id": "NIST.MEASURE-4",
+    "control_intent": "Collect evidence and logs to support traceability and auditability.",
+    "maps_from": ["Sensitive Data Exposure", "Tool Overreach", "Human Oversight Failure"],
+    "recommended_controls": [
+      "Preserve immutable run logs and tool call traces",
+      "Capture control decisions and rejection reasons",
+      "Retain evidence links for each finding"
+    ]
+  },
+  {
+    "standard": "NIST AI RMF",
+    "control_id": "NIST.MANAGE-1",
+    "control_intent": "Treat identified risks with prioritized technical and process mitigations.",
+    "maps_from": ["Tool Overreach", "Confirmation Gate Failure", "Sensitive Data Exposure"],
+    "recommended_controls": [
+      "Prioritize high-severity failures in remediation backlog",
+      "Set SLA for closing critical control gaps",
+      "Apply compensating controls until permanent fix ships"
+    ]
+  },
+  {
+    "standard": "NIST AI RMF",
+    "control_id": "NIST.MANAGE-2",
+    "control_intent": "Monitor deployed AI systems and trigger corrective action on drift or incidents.",
+    "maps_from": ["Goal Drift", "Memory Integrity Failure", "Deceptive Compliance"],
+    "recommended_controls": [
+      "Enable runtime drift detectors and stop channels",
+      "Trigger incident workflow on severe detector hits",
+      "Schedule periodic red-team regression runs"
+    ]
+  },
+  {
+    "standard": "NIST AI RMF",
+    "control_id": "NIST.MANAGE-3",
+    "control_intent": "Implement incident response and recovery for AI-related failures.",
+    "maps_from": ["Stop Mechanism Failure", "State Corruption", "Sensitive Data Exposure"],
+    "recommended_controls": [
+      "Define emergency kill-switch outside LLM loop",
+      "Run automated containment playbooks for exfiltration",
+      "Execute post-incident root cause reviews"
+    ]
+  },
+  {
+    "standard": "NIST AI RMF",
+    "control_id": "NIST.MANAGE-4",
+    "control_intent": "Maintain change management for model, policy, and tooling updates.",
+    "maps_from": ["Memory Integrity Failure", "Policy Compliance Gap", "Goal Drift"],
+    "recommended_controls": [
+      "Version policy prompts, detectors, and allowlists",
+      "Require approval before control-plane changes",
+      "Run pre-release safety regression suite"
+    ]
+  },
+  {
+    "standard": "NIST AI RMF",
+    "control_id": "NIST.MANAGE-5",
+    "control_intent": "Strengthen human oversight for high-risk and high-impact decisions.",
+    "maps_from": ["Human Oversight Failure", "Confirmation Gate Failure", "Finance Decisioning Risk"],
+    "recommended_controls": [
+      "Require explicit dual approval for destructive actions",
+      "Add non-linguistic approval UX token",
+      "Escalate high-impact decisions to human reviewers"
+    ]
+  },
+  {
+    "standard": "NIST AI RMF",
+    "control_id": "NIST.MANAGE-6",
+    "control_intent": "Enforce secure operations and least-privilege for AI-enabled tooling.",
+    "maps_from": ["Privilege Escalation", "Tool Overreach", "State Corruption"],
+    "recommended_controls": [
+      "Apply least-privilege tool scopes",
+      "Deny out-of-tier calls at tool proxy",
+      "Rotate credentials and monitor privilege misuse"
+    ]
+  },
+  {
+    "standard": "Singapore Model AI Governance Framework",
+    "control_id": "SG.MAGF-GOV-1",
+    "control_intent": "Set internal governance structures for responsible AI accountability.",
+    "maps_from": ["Human Oversight Failure", "Policy Compliance Gap", "Finance Decisioning Risk"],
+    "recommended_controls": [
+      "Assign responsible AI owners by product area",
+      "Set governance checkpoints before launch",
+      "Track unresolved risks at management level"
+    ]
+  },
+  {
+    "standard": "Singapore Model AI Governance Framework",
+    "control_id": "SG.MAGF-RISK-2",
+    "control_intent": "Use risk-based controls proportionate to harm and impact.",
+    "maps_from": ["Sensitive Data Exposure", "Privilege Escalation", "Finance Decisioning Risk"],
+    "recommended_controls": [
+      "Classify scenarios by impact and risk tier",
+      "Increase control strictness for high-risk tiers",
+      "Require exception sign-off for policy overrides"
+    ]
+  },
+  {
+    "standard": "Singapore Model AI Governance Framework",
+    "control_id": "SG.MAGF-HITL-1",
+    "control_intent": "Keep meaningful human involvement for significant automated actions.",
+    "maps_from": ["Confirmation Gate Failure", "Stop Mechanism Failure", "Human Oversight Failure"],
+    "recommended_controls": [
+      "Add explicit approval gates before irreversible actions",
+      "Block batch actions without reconfirmation",
+      "Provide operator pause/stop controls"
+    ]
+  },
+  {
+    "standard": "Singapore Model AI Governance Framework",
+    "control_id": "SG.MAGF-DATA-1",
+    "control_intent": "Protect personal and sensitive data in AI processing and outputs.",
+    "maps_from": ["Sensitive Data Exposure", "Memory Integrity Failure", "Tool Overreach"],
+    "recommended_controls": [
+      "Enforce data minimization in prompts and outputs",
+      "Apply redaction and DLP checks pre-response",
+      "Separate sensitive memory from general context"
+    ]
+  },
+  {
+    "standard": "Singapore Model AI Governance Framework",
+    "control_id": "SG.MAGF-OPS-2",
+    "control_intent": "Operationalize SOPs and monitoring for safe day-to-day AI usage.",
+    "maps_from": ["Tool Overreach", "State Corruption", "Goal Drift"],
+    "recommended_controls": [
+      "Publish SOP for unsafe behavior triage",
+      "Monitor unsafe tool trends and thresholds",
+      "Trigger rollback when error budget is exceeded"
+    ]
+  },
+  {
+    "standard": "Singapore Model AI Governance Framework",
+    "control_id": "SG.MAGF-AUDIT-1",
+    "control_intent": "Maintain records for assurance, transparency, and accountability.",
+    "maps_from": ["Deceptive Compliance", "Policy Compliance Gap", "Sensitive Data Exposure"],
+    "recommended_controls": [
+      "Store immutable logs for control decisions",
+      "Keep remediation evidence linked to findings",
+      "Generate periodic governance assurance reports"
+    ]
+  },
+  {
+    "standard": "AI Verify",
+    "control_id": "AIVERIFY-GOV-01",
+    "control_intent": "Establish accountable governance process for responsible AI deployment.",
+    "maps_from": ["Policy Compliance Gap", "Human Oversight Failure", "Finance Decisioning Risk"],
+    "recommended_controls": [
+      "Maintain governance checklist in release gates",
+      "Record control owners and review cadence",
+      "Audit unresolved high-risk findings"
+    ]
+  },
+  {
+    "standard": "AI Verify",
+    "control_id": "AIVERIFY-RISK-02",
+    "control_intent": "Perform risk identification and management across AI lifecycle.",
+    "maps_from": ["Goal Drift", "Privilege Escalation", "Sensitive Data Exposure"],
+    "recommended_controls": [
+      "Create risk register entries from each violation",
+      "Track residual risk after each mitigation",
+      "Re-test until risk scores stabilize"
+    ]
+  },
+  {
+    "standard": "AI Verify",
+    "control_id": "AIVERIFY-TEST-03",
+    "control_intent": "Validate responsible AI behavior through repeatable testing.",
+    "maps_from": ["Confirmation Gate Failure", "Tool Overreach", "Stop Mechanism Failure"],
+    "recommended_controls": [
+      "Add deterministic adversarial test scenarios",
+      "Run regression tests per policy release",
+      "Fail build on control-critical regressions"
+    ]
+  },
+  {
+    "standard": "AI Verify",
+    "control_id": "AIVERIFY-TRANSPARENCY-04",
+    "control_intent": "Provide explainability and transparency of system behavior.",
+    "maps_from": ["Deceptive Compliance", "Policy Compliance Gap", "Goal Drift"],
+    "recommended_controls": [
+      "Publish action rationale with trace references",
+      "Expose confidence and uncertainty markers",
+      "Provide user-facing explanation templates"
+    ]
+  },
+  {
+    "standard": "AI Verify",
+    "control_id": "AIVERIFY-ROBUSTNESS-05",
+    "control_intent": "Assess robustness and resilience under stress and edge conditions.",
+    "maps_from": ["State Corruption", "Memory Integrity Failure", "Stop Mechanism Failure"],
+    "recommended_controls": [
+      "Inject partial-failure and timeout scenarios",
+      "Enforce safe-retry behavior after tool errors",
+      "Use circuit breakers for cascading failures"
+    ]
+  },
+  {
+    "standard": "AI Verify",
+    "control_id": "AIVERIFY-INCIDENT-06",
+    "control_intent": "Handle and report AI incidents with documented response workflow.",
+    "maps_from": ["Sensitive Data Exposure", "Privilege Escalation", "State Corruption"],
+    "recommended_controls": [
+      "Create severity-based incident response playbooks",
+      "Assign owner and SLA for each incident",
+      "Track closure evidence and retest outcomes"
+    ]
+  },
+  {
+    "standard": "MAS FEAT",
+    "control_id": "FEAT-F-1",
+    "control_intent": "Ensure fair outcomes and avoid unjustified differential treatment.",
+    "maps_from": ["Finance Decisioning Risk", "Goal Drift", "Policy Compliance Gap"],
+    "recommended_controls": [
+      "Monitor decision parity across cohorts",
+      "Run fairness stress tests before deployment",
+      "Escalate potential bias findings for manual review"
+    ]
+  },
+  {
+    "standard": "MAS FEAT",
+    "control_id": "FEAT-E-1",
+    "control_intent": "Apply ethical use safeguards with defined accountability.",
+    "maps_from": ["Finance Decisioning Risk", "Human Oversight Failure", "Deceptive Compliance"],
+    "recommended_controls": [
+      "Add ethics approval for high-impact use cases",
+      "Document accountable business owner per model",
+      "Block deployment when ethical guardrails fail"
+    ]
+  },
+  {
+    "standard": "MAS FEAT",
+    "control_id": "FEAT-A-1",
+    "control_intent": "Maintain accountability for model decisions and lifecycle controls.",
+    "maps_from": ["Finance Decisioning Risk", "Privilege Escalation", "Policy Compliance Gap"],
+    "recommended_controls": [
+      "Keep model decision logs and approval records",
+      "Require governance sign-off for model changes",
+      "Trace each incident to accountable owner"
+    ]
+  },
+  {
+    "standard": "MAS FEAT",
+    "control_id": "FEAT-T-1",
+    "control_intent": "Provide transparency on data, model behavior, and decision rationale.",
+    "maps_from": ["Finance Decisioning Risk", "Sensitive Data Exposure", "Deceptive Compliance"],
+    "recommended_controls": [
+      "Publish explanation cards for financial decisions",
+      "Log key factors behind recommendations",
+      "Expose guardrail outcomes to reviewers"
+    ]
+  },
+  {
+    "standard": "MAS FEAT",
+    "control_id": "FEAT-T-2",
+    "control_intent": "Continuously test and evidence transparency controls in production.",
+    "maps_from": ["Finance Decisioning Risk", "Tool Overreach", "Memory Integrity Failure"],
+    "recommended_controls": [
+      "Schedule recurring transparency audits",
+      "Sample production outcomes for explainability checks",
+      "Attach audit evidence to governance dashboard"
+    ]
+  }
+]

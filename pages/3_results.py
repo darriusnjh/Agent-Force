@@ -33,6 +33,7 @@ def _render_attack_results(report: dict):
     stress = report.get("autonomy_stress", {})
     decay = report.get("safety_decay", {})
     findings = report.get("findings", [])
+    control_mapping = report.get("control_mapping", {})
     risk_points = report.get("risk_evolution", [])
 
     st.markdown(
@@ -63,6 +64,29 @@ def _render_attack_results(report: dict):
         st.metric("Would Archive", shadow.get("would_archive", 0))
     with m7:
         st.metric("Avg Reward", summary.get("avg_reward", 0.0))
+
+    if control_mapping:
+        _render_panel("CONTROL MAPPING COVERAGE", "rgba(255,160,28,0.24)")
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.metric("Control Library Size", control_mapping.get("library_size", 0))
+        with c2:
+            st.metric("Findings Mapped", control_mapping.get("findings_mapped", 0))
+        with c3:
+            st.metric("Standards Impacted", len(control_mapping.get("standard_counts", {})))
+
+        finding_type_counts = control_mapping.get("finding_type_counts", {}) or {}
+        if finding_type_counts:
+            st.dataframe(
+                [{"finding_type": k, "count": v} for k, v in finding_type_counts.items()],
+                hide_index=True,
+                use_container_width=True,
+            )
+
+        top_controls = control_mapping.get("top_controls", []) or []
+        if top_controls:
+            st.dataframe(top_controls, hide_index=True, use_container_width=True)
+        st.markdown("</div>", unsafe_allow_html=True)
 
     _render_panel("FAILURE TAXONOMY", "rgba(255,107,53,0.24)")
     taxonomy_rows = []
@@ -134,17 +158,58 @@ def _render_attack_results(report: dict):
     finding_rows = []
     for idx, item in enumerate(findings, start=1):
         hits = [name for name, hit in (item.get("detector_hits") or {}).items() if hit]
+        control_ids = item.get("mapped_control_ids", []) or []
+        finding_types = item.get("finding_types", []) or []
         finding_rows.append(
             {
                 "id": f"F-{idx:03d}",
                 "category": item.get("category"),
                 "taxonomy": item.get("taxonomy", "Unclassified"),
+                "finding_types": ", ".join(finding_types[:3]),
                 "severity": item.get("severity"),
                 "detectors": ", ".join(hits[:4]),
+                "controls": ", ".join(control_ids[:4]),
                 "recommendation": item.get("recommendation", "")[:140],
             }
         )
     st.dataframe(finding_rows or [{"id": "-", "category": "-", "taxonomy": "-", "severity": 0, "detectors": "-", "recommendation": "No findings."}], hide_index=True, use_container_width=True)
+
+    for idx, item in enumerate(findings, start=1):
+        relevance = item.get("control_relevance") or {}
+        controls = relevance.get("relevant_standards_controls", []) or []
+        if not controls:
+            continue
+
+        finding_title = f"F-{idx:03d} | {item.get('taxonomy', 'Unclassified')} | {item.get('category', 'general')}"
+        with st.expander(finding_title, expanded=idx == 1):
+            st.dataframe(
+                [
+                    {
+                        "standard": c.get("standard", ""),
+                        "control_id": c.get("control_id", ""),
+                        "control_intent": c.get("control_intent", ""),
+                    }
+                    for c in controls
+                ],
+                hide_index=True,
+                use_container_width=True,
+            )
+
+            why = str(relevance.get("why_it_matters", "")).strip()
+            if why:
+                st.markdown(f"**Why it matters:** {why}")
+
+            evidence = relevance.get("evidence_from_run_logs", []) or []
+            if evidence:
+                st.markdown("**Evidence from run logs:**")
+                for line in evidence:
+                    st.markdown(f"- {line}")
+
+            checklist = relevance.get("suggested_remediation_checklist", []) or []
+            if checklist:
+                st.markdown("**Suggested remediation checklist:**")
+                for row in checklist:
+                    st.markdown(f"- [ ] {row}")
     st.markdown("</div>", unsafe_allow_html=True)
 
 
