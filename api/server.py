@@ -31,7 +31,7 @@ load_dotenv()
 
 AGENT_MODEL = os.getenv("AGENT_MODEL", "openai/gpt-4o-mini")
 SCORER_MODEL = os.getenv("SCORER_MODEL", "openai/gpt-4o-mini")
-ADAPTIVE_MODEL = os.getenv("ADAPTIVE_MODEL", SCORER_MODEL)
+ADAPTIVE_MODEL = os.getenv("ADAPTIVE_MODEL", "gpt-5.2")
 
 ATTACK_BASELINE_CATEGORIES = [
     "data_boundary",

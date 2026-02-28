@@ -86,7 +86,7 @@ Return strictly JSON:
 @dataclass
 class AdversarialConfig:
     enabled: bool = False
-    attacker_model: str = "openai/gpt-4o"
+    attacker_model: str = "gpt-5.2"
     max_turns: int = 4
     stop_on_violation: bool = True
     temperature: float = 0.7
@@ -101,7 +101,7 @@ class AdversarialConfig:
             return cls()
         return cls(
             enabled=bool(value.get("enabled", False)),
-            attacker_model=str(value.get("attacker_model", "openai/gpt-4o")),
+            attacker_model=str(value.get("attacker_model", "gpt-5.2")),
             max_turns=max(1, int(value.get("max_turns", 4))),
             stop_on_violation=bool(value.get("stop_on_violation", True)),
             temperature=float(value.get("temperature", 0.7)),

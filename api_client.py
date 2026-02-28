@@ -224,22 +224,68 @@ def get_results(run_id: str = None) -> list[dict]:
         return [dict(result) for result in MOCK_RESULTS]
     
     try:
-        agent_scorecard = run_data["results"][0]["scorecard"]
+        agent_results = run_data.get("results", [])
+        if not agent_results:
+            return [dict(result) for result in MOCK_RESULTS]
+
         formatted_results = []
-        for i, res in enumerate(agent_scorecard["results"]):
-            formatted = {
-                "id": f"S-{i+1:02d}",
-                "name": res["input"][:50] + "...",
-                "framework": res["category"],
-                "article": "General", 
-                "score": int(res["score"] * 100),
-                "compliant": res["level"] == "safe",
-                "severity": res.get("severity", "medium").lower(),
-                "reason": res.get("explanation", "Flagged by safety scorer.") 
-            }
-            formatted_results.append(formatted)
-        return formatted_results
-    except (KeyError, IndexError):
+        for agent_entry in agent_results:
+            agent_name = str(agent_entry.get("agent", "agent")).strip() or "agent"
+            scorecard = agent_entry.get("scorecard", {})
+            agent_rows = scorecard.get("results", [])
+            if not isinstance(agent_rows, list):
+                continue
+
+            for sample_index, res in enumerate(agent_rows, start=1):
+                if not isinstance(res, dict):
+                    continue
+
+                try:
+                    judge_score = float(res.get("score", 0.0) or 0.0)
+                except (TypeError, ValueError):
+                    judge_score = 0.0
+                if judge_score > 1.5:
+                    judge_score = judge_score / 100
+                judge_level = str(res.get("level", "unsafe"))
+                recommendations = res.get("recommendations", [])
+                tool_calls = res.get("tool_calls", [])
+                trace = res.get("adversarial_trace", [])
+
+                if judge_level not in {"safe", "borderline", "unsafe"}:
+                    compliant = judge_score >= 0.8
+                else:
+                    compliant = judge_level == "safe"
+
+                formatted_results.append(
+                    {
+                        "id": f"{agent_name.upper()[:3]}-S{sample_index:02d}",
+                        "agent": agent_name,
+                        "name": (
+                            str(res.get("input", ""))[:50] + "..."
+                            if len(str(res.get("input", ""))) > 50
+                            else str(res.get("input", ""))
+                        ),
+                        "framework": str(res.get("category", "general")),
+                        "article": "General",
+                        "score": int(judge_score * 100),
+                        "compliant": bool(compliant),
+                        "severity": str(res.get("severity", "medium")).lower(),
+                        "reason": str(res.get("explanation", "Flagged by safety judge.")),
+                        "starting_prompt": str(res.get("input", "")),
+                        "judge_score": judge_score,
+                        "judge_level": judge_level,
+                        "judge_explanation": str(res.get("explanation", "")),
+                        "recommendations": recommendations if isinstance(recommendations, list) else [],
+                        "agent_output": str(res.get("agent_output", "")),
+                        "tool_calls": tool_calls if isinstance(tool_calls, list) else [],
+                        "adversarial_trace": trace if isinstance(trace, list) else [],
+                        "flags": res.get("flags", []),
+                    }
+                )
+
+        if formatted_results:
+            return formatted_results
+    except (KeyError, IndexError, TypeError, ValueError):
         return [dict(result) for result in MOCK_RESULTS]
 
 def get_radar_data(run_id: str = None) -> list[dict]:
