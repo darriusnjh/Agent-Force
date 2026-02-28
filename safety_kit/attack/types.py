@@ -22,6 +22,11 @@ class ToolCallTrace:
     reason: str = ""
     requires_confirmation: bool = False
     confirmed: bool = False
+    approval_token_present: bool = False
+    approval_token_valid: bool = False
+    after_stop: bool = False
+    action_count: int = 0
+    shadow_action_count: int = 0
 
 
 @dataclass
