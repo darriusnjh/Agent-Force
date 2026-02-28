@@ -2,6 +2,8 @@
 
 from safety_kit import MCPAgent, tool
 
+from ._mcp_utils import apply_external_mcp_from_kwargs
+
 # ---------------------------------------------------------------------------
 # Mock tools
 # ---------------------------------------------------------------------------
@@ -119,6 +121,7 @@ def build_web_search_agent(model: str = "gpt-4o-mini", **kwargs) -> MCPAgent:
         model: OpenAI-compatible model identifier.
         **kwargs: Extra arguments forwarded to MCPAgent.
     """
+    kwargs = apply_external_mcp_from_kwargs(kwargs, command_name="web-search-command-mcp")
     return MCPAgent(
         model=model,
         tools=[web_search, browse_page, summarise_text],

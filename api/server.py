@@ -128,7 +128,10 @@ class RunRequest(BaseModel):
     world_pack: str = "acme_corp_v1"
     demo_mode: Literal["live_hybrid", "deterministic"] = "live_hybrid"
     trace_level: Literal["summary", "full"] = "full"
-    mcp_registry_links: list[str] = []
+    mcp_registry_links: list[str] = Field(default_factory=list)
+    mcp_server_urls: list[str] = Field(default_factory=list)
+    mcp_server_command: Optional[str] = None
+    mcp_server_args: list[str] = Field(default_factory=list)
 
 
 class RunCreated(BaseModel):
@@ -148,6 +151,9 @@ class AttackTarget(BaseModel):
     demo_mode: Literal["live_hybrid", "deterministic"] = "deterministic"
     trace_level: Literal["summary", "full"] = "full"
     mcp_registry_links: list[str] = Field(default_factory=list)
+    mcp_server_urls: list[str] = Field(default_factory=list)
+    mcp_server_command: Optional[str] = None
+    mcp_server_args: list[str] = Field(default_factory=list)
 
 
 class AgentCard(BaseModel):
@@ -279,7 +285,16 @@ def _build_scorer(req: RunRequest, scorer_model: str):
         return DeterministicSafetyScorer(), True
 
 
-def _build_world_solver(key: str, model: str, world):
+def _build_world_solver(
+    key: str,
+    model: str,
+    world,
+    mcp_manifests: Optional[list[dict[str, Any]]] = None,
+    mcp_server_urls: Optional[list[str]] = None,
+    mcp_server_command: Optional[str] = None,
+    mcp_server_args: Optional[list[str]] = None,
+    on_tool_call: Any | None = None,
+):
     from sandbox_env.runtime import (
         build_world_code_exec_agent,
         build_world_email_agent,
@@ -287,12 +302,42 @@ def _build_world_solver(key: str, model: str, world):
     )
 
     if key == "email":
-        return build_world_email_agent(model=model, world=world)
+        return build_world_email_agent(
+            model=model,
+            world=world,
+            mcp_manifests=mcp_manifests,
+            mcp_server_urls=mcp_server_urls,
+            mcp_server_command=mcp_server_command,
+            mcp_server_args=mcp_server_args,
+            on_tool_call=on_tool_call,
+        )
     if key == "web_search":
-        return build_world_web_search_agent(model=model, world=world)
+        return build_world_web_search_agent(
+            model=model,
+            world=world,
+            mcp_manifests=mcp_manifests,
+            mcp_server_urls=mcp_server_urls,
+            mcp_server_command=mcp_server_command,
+            mcp_server_args=mcp_server_args,
+            on_tool_call=on_tool_call,
+        )
     if key == "code_exec":
-        return build_world_code_exec_agent(model=model, world=world)
+        return build_world_code_exec_agent(
+            model=model,
+            world=world,
+            mcp_manifests=mcp_manifests,
+            mcp_server_urls=mcp_server_urls,
+            mcp_server_command=mcp_server_command,
+            mcp_server_args=mcp_server_args,
+            on_tool_call=on_tool_call,
+        )
     return None
+
+
+def _normalise_mcp_command_args(args: Optional[list[str]]) -> list[str]:
+    if not args:
+        return []
+    return [str(item) for item in args if str(item).strip()]
 
 
 # ---------------------------------------------------------------------------
@@ -323,6 +368,44 @@ async def _run_evaluation(run_id: str, req: RunRequest) -> None:
         artifact_writer = ArtifactWriter(run_id=run_id, config=req.model_dump())
 
         resolved_mcp_manifests, mcp_resolution_errors = resolve_registry_links(req.mcp_registry_links)
+        await store.append_event(
+            run_id,
+            {
+                "type": "mcp_resolution",
+                "message": (
+                    f"Resolved {len(resolved_mcp_manifests)} MCP manifest(s), "
+                    f"errors={len(mcp_resolution_errors)}"
+                ),
+                "resolved": [
+                    {
+                        "source_url": m.get("source_url"),
+                        "command": m.get("command"),
+                        "args_count": len(m.get("args", []) or []),
+                    }
+                    for m in resolved_mcp_manifests
+                ],
+                "errors": mcp_resolution_errors,
+            },
+        )
+        if req.mcp_server_urls:
+            await store.append_event(
+                run_id,
+                {
+                    "type": "mcp_direct_urls",
+                    "message": f"Configured {len(req.mcp_server_urls)} direct MCP URL(s)",
+                    "urls": req.mcp_server_urls,
+                },
+            )
+        if req.mcp_server_command:
+            await store.append_event(
+                run_id,
+                {
+                    "type": "mcp_command",
+                    "message": f"Configured MCP launch command {req.mcp_server_command!r}",
+                    "command": req.mcp_server_command,
+                    "args": req.mcp_server_args,
+                },
+            )
 
         results: list[dict] = []
         aggregate_rule_hits: list[dict] = []
@@ -338,6 +421,27 @@ async def _run_evaluation(run_id: str, req: RunRequest) -> None:
             cfg = registry[key]
             sandbox = None
             solver = None
+            agent_label = key
+
+            async def on_tool_call(tool_call, state, agent_name=agent_label):
+                await store.append_event(
+                    run_id,
+                    {
+                        "type": "tool_call",
+                        "agent": agent_name,
+                        "sample_index": state.metadata.get("sample_index"),
+                        "total_samples": state.metadata.get("total_samples"),
+                        "epoch": state.metadata.get("epoch"),
+                        "tool_name": tool_call.tool_name,
+                        "tool_input": tool_call.tool_input,
+                        "tool_output": str(tool_call.tool_output)[:500],
+                    },
+                )
+
+            async def on_eval_event(payload: dict[str, Any], agent_name=agent_label):
+                event_payload = dict(payload)
+                event_payload["agent"] = agent_name
+                await store.append_event(run_id, event_payload)
 
             if req.sandbox_mode == "world_stateful":
                 sandbox = StatefulWorldSandbox(
@@ -347,11 +451,19 @@ async def _run_evaluation(run_id: str, req: RunRequest) -> None:
                     scorer_model=scorer_model,
                     agent_name=key,
                     mcp_manifests=resolved_mcp_manifests,
+                    mcp_server_urls=req.mcp_server_urls,
+                    mcp_server_command=req.mcp_server_command,
+                    mcp_server_args=_normalise_mcp_command_args(req.mcp_server_args),
                 )
                 world_solver = _build_world_solver(
                     key=key,
                     model=agent_model,
                     world=sandbox.world,
+                    mcp_manifests=resolved_mcp_manifests,
+                    mcp_server_urls=req.mcp_server_urls,
+                    mcp_server_command=req.mcp_server_command,
+                    mcp_server_args=_normalise_mcp_command_args(req.mcp_server_args),
+                    on_tool_call=on_tool_call,
                 )
                 if world_solver is not None:
                     solver = world_solver
@@ -363,7 +475,19 @@ async def _run_evaluation(run_id: str, req: RunRequest) -> None:
                     solver = _noop_agent
 
             if solver is None:
-                solver = cfg["builder"](model=agent_model)
+                builder_kwargs: dict[str, Any] = {
+                    "model": agent_model,
+                    "on_tool_call": on_tool_call,
+                }
+                if req.mcp_server_urls:
+                    builder_kwargs["mcp_server_urls"] = req.mcp_server_urls
+                if req.mcp_server_command:
+                    builder_kwargs["mcp_server_command"] = req.mcp_server_command
+                if req.mcp_server_args:
+                    builder_kwargs["mcp_server_args"] = _normalise_mcp_command_args(
+                        req.mcp_server_args
+                    )
+                solver = cfg["builder"](**builder_kwargs)
 
             task = Task(
                 name=cfg["name"],
@@ -371,6 +495,7 @@ async def _run_evaluation(run_id: str, req: RunRequest) -> None:
                 solver=solver,
                 scorer=scorer,
                 sandbox=sandbox,
+                on_event=on_eval_event,
             )
 
             try:
@@ -469,6 +594,9 @@ async def _run_evaluation(run_id: str, req: RunRequest) -> None:
                 "llm_hit_rule_miss": len(aggregate_rule_miss),
             },
             "mcp_manifest_count": len(resolved_mcp_manifests),
+            "mcp_server_url_count": len(req.mcp_server_urls),
+            "mcp_server_command": req.mcp_server_command,
+            "mcp_server_arg_count": len(req.mcp_server_args),
             "scorer_fallback_used": scorer_fallback_used,
         }
 
@@ -491,6 +619,9 @@ async def _run_evaluation(run_id: str, req: RunRequest) -> None:
                 "world_pack": req.world_pack,
                 "sandbox_mode": req.sandbox_mode,
                 "mcp_manifests": resolved_mcp_manifests,
+                "mcp_server_urls": req.mcp_server_urls,
+                "mcp_server_command": req.mcp_server_command,
+                "mcp_server_args": _normalise_mcp_command_args(req.mcp_server_args),
             }
         )
 
@@ -578,6 +709,9 @@ async def _run_attack_campaign(
             scorer_model=SCORER_MODEL,
             api_key=openai_api_key,
             mcp_registry_links=req.target_agent.mcp_registry_links,
+            mcp_server_urls=req.target_agent.mcp_server_urls,
+            mcp_server_command=req.target_agent.mcp_server_command,
+            mcp_server_args=req.target_agent.mcp_server_args,
         )
     else:
         target_adapter = MockScriptedTargetAdapter(script=req.target_agent.mock_script or [])

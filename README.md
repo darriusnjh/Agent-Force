@@ -151,6 +151,137 @@ curl -X POST http://localhost:8000/runs \
   }'
 ```
 
+### Test direct MCP URLs (and optional `mcp_registry_links`) with ngrok
+
+This repo includes two helper scripts:
+- `scripts/test_mcp_server.py`: minimal MCP server with tools (`ping`, `add`, `echo`, `now_utc`) supporting `streamable-http`, `sse`, and `stdio`.
+- `scripts/test_mcp_registry_host.py`: serves a registry manifest over HTTP.
+
+1. Start the MCP server in direct URL mode:
+
+```bash
+python scripts/test_mcp_server.py --transport streamable-http --host 127.0.0.1 --port 8765
+```
+
+2. Expose it publicly:
+
+```bash
+ngrok http 8765
+```
+
+3. Use the public URL + `/mcp` as a direct server URL (not `/registry.json`):
+
+```text
+https://abc123.ngrok-free.app/mcp
+```
+
+4. Use that URL in your run payload via `mcp_server_urls`:
+
+```bash
+curl -X POST http://localhost:8000/runs \
+  -H "Content-Type: application/json" \
+  -d '{
+    "agents": ["email"],
+    "sandbox_mode": "world_stateful",
+    "demo_mode": "live_hybrid",
+    "mcp_server_urls": [
+      "https://abc123.ngrok-free.app/mcp"
+    ]
+  }'
+```
+
+You can also launch MCP by command + args directly (no registry/manifest required):
+
+```bash
+curl -X POST http://localhost:8000/runs \
+  -H "Content-Type: application/json" \
+  -d '{
+    "agents": ["email"],
+    "sandbox_mode": "world_stateful",
+    "demo_mode": "live_hybrid",
+    "mcp_server_command": "python",
+    "mcp_server_args": ["scripts/test_mcp_server.py", "--transport", "sse"]
+  }'
+```
+
+```bash
+curl -X POST http://localhost:8000/runs \
+  -H "Content-Type: application/json" \
+  -d '{
+    "agents": ["email"],
+    "sandbox_mode": "world_stateful",
+    "demo_mode": "live_hybrid",
+    "mcp_server_command": "uvx",
+    "mcp_server_args": [
+      "mcp-atlassian",
+      "--jira-url",
+      "https://your-domain.atlassian.net/",
+      "--jira-username",
+      "you@company.com",
+      "--jira-token",
+      "REDACTED"
+    ]
+  }'
+```
+
+You can use the same pattern in non-world mode too (`sandbox_mode: "none"`), where commands are attached directly to the underlying MCPAgent.
+
+Optional transport prefix:
+- `sse|https://abc123.ngrok-free.app/sse`
+
+Optional legacy registry flow:
+
+1. Start the registry host:
+
+```bash
+python scripts/test_mcp_registry_host.py --port 8787
+```
+
+To expose your existing Cursor MCP config directly:
+
+```bash
+python scripts/test_mcp_registry_host.py --port 8787 \
+  --mcp-json "C:\Users\<you>\.cursor\mcp.json" \
+  --server-name jira-mcp
+```
+
+2. Expose it publicly:
+
+```bash
+ngrok http 8787
+```
+
+3. Copy the public URL and append `/mcp/registry.json`.
+
+Example:
+
+```text
+https://abc123.ngrok-free.app/mcp/registry.json
+```
+
+4. Use that URL in your run payload:
+
+```bash
+curl -X POST http://localhost:8000/runs \
+  -H "Content-Type: application/json" \
+  -d '{
+    "agents": ["email"],
+    "sandbox_mode": "world_stateful",
+    "demo_mode": "deterministic",
+    "mcp_registry_links": [
+      "https://abc123.ngrok-free.app/mcp/registry.json"
+    ]
+  }'
+```
+
+5. Verify in run output (`GET /runs/{id}`):
+- `mcp_manifests` contains your source URL and pinned digest.
+- `mcp_resolution_errors` is empty.
+
+Notes:
+- To execute MCP tools, run with `demo_mode: "live_hybrid"` (deterministic mode does not execute the live model/tool loop).
+- The resolved manifest command/args are now attached to sandbox world agents as real MCP tool servers.
+
 **Run a defensive attack/test campaign:**
 (`target_agent.type` defaults to `world_sandbox`; direct HTTP targets are blocked unless `require_sandbox=false`)
 

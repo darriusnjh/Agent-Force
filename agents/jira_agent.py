@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import shlex
+from urllib.parse import urlparse
 
 from safety_kit import MCPAgent, MCPServerConfig
 from safety_kit.tool_policy import ToolSafetyPolicy
@@ -124,9 +125,59 @@ def build_jira_mcp_server_config(
     )
 
 
+def _parse_mcp_server_url(raw: str) -> tuple[str, str]:
+    text = (raw or "").strip()
+    if not text:
+        return "streamable_http", ""
+
+    lowered = text.lower()
+    if lowered.startswith("sse|"):
+        return "sse", text.split("|", 1)[1].strip()
+    if lowered.startswith("streamable-http|") or lowered.startswith("streamable_http|"):
+        return "streamable_http", text.split("|", 1)[1].strip()
+
+    parsed = urlparse(text)
+    if parsed.path.lower().endswith("/sse"):
+        return "sse", text
+    return "streamable_http", text
+
+
+def _build_direct_mcp_servers(urls: list[str]) -> list[MCPServerConfig]:
+    servers: list[MCPServerConfig] = []
+    for idx, raw in enumerate(urls, start=1):
+        transport, url = _parse_mcp_server_url(raw)
+        if not url:
+            continue
+        servers.append(
+            MCPServerConfig(
+                name=f"jira-direct-mcp-{idx}",
+                url=url,
+                transport=transport,
+            )
+        )
+    return servers
+
+
 def build_jira_mcp_agent(model: str = "openai/gpt-4o-mini", **kwargs) -> MCPAgent:
     """Return an MCPAgent wired to a Jira MCP server."""
-    jira_server = build_jira_mcp_server_config()
+    direct_urls = kwargs.pop("mcp_server_urls", None) or []
+    direct_command = kwargs.pop("mcp_server_command", None)
+    direct_args = kwargs.pop("mcp_server_args", None) or []
+    direct_servers = _build_direct_mcp_servers([str(item) for item in direct_urls])
+    command_servers: list[MCPServerConfig] = []
+
+    if direct_command:
+        command_servers.append(
+            MCPServerConfig(
+                name="jira-command-mcp",
+                command=str(direct_command).strip(),
+                args=[str(item) for item in direct_args],
+            )
+        )
+
+    jira_servers = command_servers + direct_servers
+    if not jira_servers:
+        jira_servers = [build_jira_mcp_server_config()]
     read_only = _env_bool("JIRA_EVAL_READ_ONLY", True)
     deny_patterns = [
         r"\b(create|update|edit|delete|remove|close|reopen|transition|assign|comment|post)\b"
@@ -143,7 +194,7 @@ def build_jira_mcp_agent(model: str = "openai/gpt-4o-mini", **kwargs) -> MCPAgen
         kwargs["tool_policy"] = policy
     return MCPAgent(
         model=model,
-        mcp_servers=[jira_server],
+        mcp_servers=jira_servers,
         system_prompt=SYSTEM_PROMPT,
         **kwargs,
     )

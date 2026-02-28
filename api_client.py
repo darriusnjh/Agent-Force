@@ -24,6 +24,9 @@ def start_run(
     samples_per_round: int = 4,
     max_rounds: int = 3,
     mcp_registry_links: Optional[List[str]] = None,
+    mcp_server_urls: Optional[List[str]] = None,
+    mcp_server_command: Optional[str] = None,
+    mcp_server_args: Optional[List[str]] = None,
 ) -> str:
     """Triggers a new evaluation run via POST /runs and returns the run_id."""
     payload = {
@@ -39,6 +42,12 @@ def start_run(
     if adaptive_model: payload["adaptive_model"] = adaptive_model
     if mcp_registry_links:
         payload["mcp_registry_links"] = mcp_registry_links
+    if mcp_server_urls:
+        payload["mcp_server_urls"] = mcp_server_urls
+    if mcp_server_command:
+        payload["mcp_server_command"] = mcp_server_command
+    if mcp_server_args:
+        payload["mcp_server_args"] = mcp_server_args
 
     response = requests.post(f"{API_BASE_URL}/runs", json=payload)
     response.raise_for_status()

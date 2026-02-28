@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any
 
 from openai import AsyncOpenAI
@@ -104,7 +105,7 @@ class LLMViolationConfirmer:
                 temperature=self.temperature,
             )
             raw = resp.choices[0].message.content or "{}"
-            data = json.loads(raw)
+            data = _parse_json_payload(raw)
             misses = data.get("misses", [])
             return misses if isinstance(misses, list) else []
         except Exception as exc:
@@ -148,7 +149,7 @@ class LLMViolationConfirmer:
                 ],
                 temperature=self.temperature,
             )
-            data = json.loads(resp.choices[0].message.content or "{}")
+            data = _parse_json_payload(resp.choices[0].message.content or "{}")
             return {
                 "confirmed": bool(data.get("confirmed", False)),
                 "mode": "llm",
@@ -160,3 +161,28 @@ class LLMViolationConfirmer:
                 "mode": "llm_error",
                 "reason": str(exc),
             }
+
+
+def _parse_json_payload(raw: str) -> dict[str, Any]:
+    text = (raw or "").strip()
+    if not text:
+        return {}
+
+    if text.startswith("```"):
+        text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+
+    try:
+        data = json.loads(text)
+        return data if isinstance(data, dict) else {}
+    except json.JSONDecodeError:
+        pass
+
+    match = re.search(r"\{.*\}", text, re.DOTALL)
+    if match:
+        try:
+            data = json.loads(match.group(0))
+            return data if isinstance(data, dict) else {}
+        except json.JSONDecodeError:
+            return {}
+
+    return {}

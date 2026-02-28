@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from .sandbox import LocalSandbox, Sandbox
 from .scorecard import SampleResult, Scorecard
@@ -29,6 +29,7 @@ class Task:
     sandbox: Sandbox | None = None
     epochs: int = 1
     tool_policy: ToolSafetyPolicy | None = None
+    on_event: Callable[[dict[str, Any]], Awaitable[None] | None] | None = None
 
 
 async def evaluate_async(
@@ -77,12 +78,33 @@ async def evaluate_async(
                     "epoch": epoch + 1,
                 },
             )
+            await _emit_task_event(
+                task,
+                {
+                    "type": "sample_start",
+                    "sample_index": sample_index,
+                    "total_samples": total,
+                    "epoch": epoch + 1,
+                    "category": sample.category,
+                    "input": sample.input[:300],
+                },
+            )
 
             try:
                 state = await sandbox.run(task.solver, state)
             except Exception as exc:
                 logger.error("Agent failed on sample: %s", exc)
                 state.output = f"[Agent error: {_format_agent_exception(exc)}]"
+                await _emit_task_event(
+                    task,
+                    {
+                        "type": "sample_agent_error",
+                        "sample_index": sample_index,
+                        "total_samples": total,
+                        "epoch": epoch + 1,
+                        "error": _format_agent_exception(exc),
+                    },
+                )
 
             try:
                 score = await task.scorer(state, sample)
@@ -92,6 +114,16 @@ async def evaluate_async(
                     value=0.0,
                     level=SafetyLevel.UNSAFE,
                     explanation=f"Scoring error: {exc}",
+                )
+                await _emit_task_event(
+                    task,
+                    {
+                        "type": "sample_scorer_error",
+                        "sample_index": sample_index,
+                        "total_samples": total,
+                        "epoch": epoch + 1,
+                        "error": str(exc),
+                    },
                 )
 
             if task.tool_policy is not None:
@@ -104,6 +136,33 @@ async def evaluate_async(
                     score = _apply_tool_policy(score, policy_result, task.tool_policy)
 
             results.append(SampleResult(sample=sample, state=state, score=score))
+            await _emit_task_event(
+                task,
+                {
+                    "type": "sample_result",
+                    "sample_index": sample_index,
+                    "total_samples": total,
+                    "epoch": epoch + 1,
+                    "category": sample.category,
+                    "score": score.value,
+                    "level": score.level.value,
+                    "judge_explanation": (score.explanation or "")[:500],
+                    "agent_output": (state.output or "")[:700],
+                    "tool_calls_count": len(state.actions),
+                    "fallback_used": bool(
+                        (state.metadata.get("sandbox") or {}).get("fallback_used", False)
+                    ),
+                    "fallback_reason": str(state.metadata.get("fallback_reason", ""))[:500],
+                    "tool_calls": [
+                        {
+                            "tool": action.tool_name,
+                            "input": action.tool_input,
+                            "output": str(action.tool_output)[:240],
+                        }
+                        for action in state.actions[:5]
+                    ],
+                },
+            )
 
             completed += 1
             if progress_bar is not None:
@@ -166,6 +225,17 @@ def _format_agent_exception(exc: Exception) -> str:
         suffix = f" (+{len(leaves) - 2} more)" if len(leaves) > 2 else ""
         return f"{exc} | causes: {'; '.join(leaf_messages)}{suffix}"
     return str(exc)
+
+
+async def _emit_task_event(task: Task, payload: dict[str, Any]) -> None:
+    if task.on_event is None:
+        return
+    try:
+        maybe = task.on_event(payload)
+        if asyncio.iscoroutine(maybe):
+            await maybe
+    except Exception as exc:
+        logger.warning("task.on_event handler raised: %s", exc)
 
 
 def _flatten_exception_group(exc: Any) -> list[Exception]:

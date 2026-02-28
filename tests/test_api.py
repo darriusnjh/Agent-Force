@@ -217,6 +217,89 @@ async def test_mcp_registry_links_are_resolved_and_persisted():
 
 
 @pytest.mark.asyncio
+async def test_direct_mcp_server_urls_are_persisted():
+    direct_urls = [
+        "https://mcp.example.test/mcp",
+        "sse|https://mcp.example.test/sse",
+    ]
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        response = await ac.post(
+            "/runs",
+            json={
+                "agents": ["email"],
+                "sandbox_mode": "world_stateful",
+                "demo_mode": "deterministic",
+                "mcp_server_urls": direct_urls,
+            },
+        )
+        assert response.status_code == 202
+        run_id = response.json()["run_id"]
+
+        run_data = await _wait_until_finished(ac, run_id)
+        assert run_data["status"] == "done"
+        assert run_data["config"]["mcp_server_urls"] == direct_urls
+        assert run_data["mcp_server_urls"] == direct_urls
+
+
+@pytest.mark.asyncio
+async def test_command_mcp_server_args_are_persisted():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        response = await ac.post(
+            "/runs",
+            json={
+                "agents": ["email"],
+                "sandbox_mode": "world_stateful",
+                "demo_mode": "deterministic",
+                "mcp_server_command": "python",
+                "mcp_server_args": ["scripts/test_mcp_server.py", "--transport", "sse"],
+            },
+        )
+        assert response.status_code == 202
+        run_id = response.json()["run_id"]
+
+        run_data = await _wait_until_finished(ac, run_id)
+        assert run_data["status"] == "done"
+        assert run_data["config"]["mcp_server_command"] == "python"
+        assert run_data["config"]["mcp_server_args"] == [
+            "scripts/test_mcp_server.py",
+            "--transport",
+            "sse",
+        ]
+        assert run_data["mcp_server_command"] == "python"
+        assert run_data["mcp_server_args"] == [
+            "scripts/test_mcp_server.py",
+            "--transport",
+            "sse",
+        ]
+
+
+@pytest.mark.asyncio
+async def test_command_mcp_config_is_used_in_non_world_mode():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        response = await ac.post(
+            "/runs",
+            json={
+                "agents": ["email"],
+                "sandbox_mode": "none",
+                "demo_mode": "deterministic",
+                "mcp_server_command": "python",
+                "mcp_server_args": ["scripts/test_mcp_server.py", "--transport", "sse"],
+            },
+        )
+        assert response.status_code == 202
+        run_id = response.json()["run_id"]
+
+        run_data = await _wait_until_finished(ac, run_id)
+        assert run_data["status"] in {"done", "error"}
+        assert run_data["config"]["mcp_server_command"] == "python"
+        assert run_data["config"]["mcp_server_args"] == [
+            "scripts/test_mcp_server.py",
+            "--transport",
+            "sse",
+        ]
+
+
+@pytest.mark.asyncio
 async def test_create_attack_run():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         response = await ac.post(

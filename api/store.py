@@ -221,7 +221,7 @@ def _is_sensitive_key(key: str) -> bool:
 
 def _looks_like_command_args_key(key: str) -> bool:
     normalized = key.strip().lower().replace("-", "_")
-    return normalized in {"args", "argv", "command_args", "mcp_args"}
+    return normalized in {"args", "argv", "command_args", "mcp_args", "mcp_server_args"}
 
 
 def _looks_like_command_args(items: list[Any]) -> bool:

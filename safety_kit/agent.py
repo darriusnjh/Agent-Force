@@ -6,7 +6,7 @@ import json
 import logging
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, get_type_hints
+from typing import Any, Awaitable, Callable, Literal, get_type_hints
 
 from openai import AsyncOpenAI
 
@@ -92,9 +92,12 @@ class MCPServerConfig:
     """How to launch and connect to an MCP tool server."""
 
     name: str
-    command: str
+    command: str | None = None
     args: list[str] = field(default_factory=list)
     env: dict[str, str] | None = None
+    url: str | None = None
+    transport: Literal["stdio", "streamable_http", "sse"] = "stdio"
+    headers: dict[str, str] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -185,7 +188,9 @@ class MCPAgent:
 
         try:
             from mcp import ClientSession, StdioServerParameters
+            from mcp.client.sse import sse_client
             from mcp.client.stdio import stdio_client
+            from mcp.client.streamable_http import streamable_http_client
         except ImportError:
             raise ImportError(
                 "The 'mcp' package is required for MCP server support. "
@@ -196,39 +201,67 @@ class MCPAgent:
         dispatch: dict[str, Callable] = {}
 
         for cfg in self.mcp_servers:
-            params = StdioServerParameters(
-                command=cfg.command,
-                args=cfg.args,
-                env=cfg.env,
-            )
-            streams = await stack.enter_async_context(stdio_client(params))
-            read_stream, write_stream = streams
-            session: ClientSession = await stack.enter_async_context(
-                ClientSession(read_stream, write_stream)
-            )
-            await session.initialize()
+            try:
+                transport = (cfg.transport or "stdio").strip().lower()
+                if cfg.url:
+                    if transport == "sse":
+                        read_stream, write_stream = await stack.enter_async_context(
+                            sse_client(cfg.url, headers=cfg.headers)
+                        )
+                    else:
+                        http_client = None
+                        if cfg.headers:
+                            import httpx
 
-            tools_result = await session.list_tools()
-            for mcp_tool in tools_result.tools:
-                schema = {
-                    "type": "function",
-                    "function": {
-                        "name": mcp_tool.name,
-                        "description": mcp_tool.description or "",
-                        "parameters": mcp_tool.inputSchema,
-                    },
-                }
-                schemas.append(schema)
+                            http_client = await stack.enter_async_context(
+                                httpx.AsyncClient(headers=cfg.headers)
+                            )
+                        streams = await stack.enter_async_context(
+                            streamable_http_client(cfg.url, http_client=http_client)
+                        )
+                        read_stream, write_stream, _get_session_id = streams
+                else:
+                    if not cfg.command:
+                        raise ValueError("MCP stdio server requires a command.")
+                    params = StdioServerParameters(
+                        command=cfg.command,
+                        args=cfg.args,
+                        env=cfg.env,
+                    )
+                    read_stream, write_stream = await stack.enter_async_context(stdio_client(params))
 
-                async def _mcp_call(_args: dict, _sess=session, _name=mcp_tool.name) -> str:
-                    result = await _sess.call_tool(_name, arguments=_args)
-                    texts = []
-                    for item in result.content:
-                        if hasattr(item, "text"):
-                            texts.append(item.text)
-                    return "\n".join(texts) if texts else str(result.content)
+                session: ClientSession = await stack.enter_async_context(
+                    ClientSession(read_stream, write_stream)
+                )
+                await session.initialize()
 
-                dispatch[mcp_tool.name] = _mcp_call
+                tools_result = await session.list_tools()
+                for mcp_tool in tools_result.tools:
+                    schema = {
+                        "type": "function",
+                        "function": {
+                            "name": mcp_tool.name,
+                            "description": mcp_tool.description or "",
+                            "parameters": mcp_tool.inputSchema,
+                        },
+                    }
+                    schemas.append(schema)
+
+                    async def _mcp_call(_args: dict, _sess=session, _name=mcp_tool.name) -> str:
+                        result = await _sess.call_tool(_name, arguments=_args)
+                        texts = []
+                        for item in result.content:
+                            if hasattr(item, "text"):
+                                texts.append(item.text)
+                        return "\n".join(texts) if texts else str(result.content)
+
+                    dispatch[mcp_tool.name] = _mcp_call
+            except Exception as exc:
+                raise RuntimeError(
+                    "MCP server initialization failed "
+                    f"(name={cfg.name!r}, transport={transport!r}, command={cfg.command!r}, "
+                    f"url={cfg.url!r}, args_count={len(cfg.args)}): {exc}"
+                ) from exc
 
         return schemas, dispatch
 

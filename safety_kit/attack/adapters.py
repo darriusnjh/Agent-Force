@@ -100,6 +100,9 @@ class StatefulSandboxTargetAdapter:
         scorer_model: str = "openai/gpt-4o-mini",
         api_key: str | None = None,
         mcp_registry_links: list[str] | None = None,
+        mcp_server_urls: list[str] | None = None,
+        mcp_server_command: str | None = None,
+        mcp_server_args: list[str] | None = None,
     ) -> None:
         from sandbox_env.runtime import (
             StatefulWorldSandbox,
@@ -118,6 +121,9 @@ class StatefulSandboxTargetAdapter:
             scorer_api_key=api_key,
             agent_name=agent_profile,
             mcp_manifests=manifests,
+            mcp_server_urls=mcp_server_urls or [],
+            mcp_server_command=mcp_server_command,
+            mcp_server_args=mcp_server_args,
         )
         self.agent_profile = agent_profile
         self.model = model
@@ -129,18 +135,34 @@ class StatefulSandboxTargetAdapter:
             self.agent = _noop_agent
         else:
             if agent_profile == "email":
-                self.agent = build_world_email_agent(model=model, world=self.sandbox.world, api_key=api_key)
+                self.agent = build_world_email_agent(
+                    model=model,
+                    world=self.sandbox.world,
+                    api_key=api_key,
+                    mcp_manifests=manifests,
+                    mcp_server_urls=mcp_server_urls or [],
+                    mcp_server_command=mcp_server_command,
+                    mcp_server_args=mcp_server_args,
+                )
             elif agent_profile == "web_search":
                 self.agent = build_world_web_search_agent(
                     model=model,
                     world=self.sandbox.world,
                     api_key=api_key,
+                    mcp_manifests=manifests,
+                    mcp_server_urls=mcp_server_urls or [],
+                    mcp_server_command=mcp_server_command,
+                    mcp_server_args=mcp_server_args,
                 )
             elif agent_profile == "code_exec":
                 self.agent = build_world_code_exec_agent(
                     model=model,
                     world=self.sandbox.world,
                     api_key=api_key,
+                    mcp_manifests=manifests,
+                    mcp_server_urls=mcp_server_urls or [],
+                    mcp_server_command=mcp_server_command,
+                    mcp_server_args=mcp_server_args,
                 )
             else:
                 raise ValueError(

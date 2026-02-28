@@ -2,6 +2,7 @@
 import json
 import os
 import sys
+import shlex
 
 import streamlit as st
 from dotenv import load_dotenv
@@ -48,6 +49,31 @@ ATTACK_CATEGORIES = [
     "batching_runaway",
 ]
 
+STANDARD_AGENT_OPTIONS = ["email", "web_search", "code_exec", "jira"]
+STANDARD_AGENT_MODEL_OPTIONS = [
+    "openai/gpt-5.3",
+    "openai/gpt-4o",
+    "openai/gpt-4o-mini",
+    "groq/llama-3.1-8b-instant",
+    "ollama/llama3.2",
+    "gemini/gemini-1.5-flash",
+]
+STANDARD_JUDGE_MODEL_OPTIONS = [
+    "openai/gpt-5.3",
+    "openai/gpt-4o",
+    "openai/gpt-4o-mini",
+    "anthropic/claude-3-5-sonnet",
+    "groq/llama-3.1-70b-versatile",
+]
+STANDARD_FRAMEWORK_OPTIONS = [
+    "EU AI Act",
+    "GDPR",
+    "NIST RMF 2.0",
+    "ISO 27001",
+    "SOC 2",
+    "CCPA",
+]
+
 
 def _parse_csv_items(raw: str) -> list[str]:
     return [item.strip() for item in (raw or "").split(",") if item.strip()]
@@ -61,6 +87,20 @@ def _parse_json_list(raw: str) -> list[dict]:
     if not isinstance(data, list):
         raise ValueError("Mock script must be a JSON array.")
     return [item for item in data if isinstance(item, dict)]
+
+
+def _parse_mcp_arg_string(raw: str) -> list[str]:
+    text = (raw or "").strip()
+    if not text:
+        return []
+    try:
+        return [item for item in shlex.split(text) if item.strip()]
+    except ValueError:
+        # Fallback to simple JSON array input if shell parsing fails.
+        parsed = json.loads(text)
+        if isinstance(parsed, list):
+            return [str(item) for item in parsed]
+        raise ValueError("MCP args must be a shell-like command line or JSON array.")
 
 
 def _build_tool_specs(tools: list[str]) -> list[dict]:
@@ -228,18 +268,95 @@ def _render_attack_report(report: dict):
 
 alive = is_backend_alive()
 render_topnav("evaluation", backend_alive=alive)
-config = render_sidebar(backend_alive=alive)
+render_sidebar(backend_alive=alive)
 render_page_header("Run Evaluation", "Evaluation", (COLORS["accent2"], COLORS["accent3"]))
 
 scenarios = get_scenarios()
 tab_standard, tab_attack = st.tabs(["Standard Evaluation", "Attack Kit"])
 
 with tab_standard:
+    _render_panel("STANDARD EVALUATION CONFIGURATION", "rgba(0,212,255,0.2)")
+    cfg1, cfg2, cfg3 = st.columns(3)
+    with cfg1:
+        std_agent = st.selectbox(
+            "Agent Under Test",
+            STANDARD_AGENT_OPTIONS,
+            key="std_agent",
+            help="Built-in agent profile to evaluate.",
+        )
+    with cfg2:
+        std_agent_model = st.selectbox(
+            "Agent Model",
+            STANDARD_AGENT_MODEL_OPTIONS,
+            key="std_agent_model",
+            help="Model used by the tested agent.",
+        )
+    with cfg3:
+        std_scorer_model = st.selectbox(
+            "Judge Model",
+            STANDARD_JUDGE_MODEL_OPTIONS,
+            key="std_scorer_model",
+            help="Model used by the safety judge/scorer.",
+        )
+
+    cfg4, cfg5, cfg6 = st.columns(3)
+    with cfg4:
+        std_adaptive = st.toggle(
+            "Adaptive Generation",
+            key="std_adaptive",
+            help="Generate harder follow-up scenarios that target weak categories.",
+        )
+    with cfg5:
+        if std_adaptive:
+            std_max_rounds = st.slider("Max Adaptive Rounds", 1, 5, 3, key="std_max_rounds")
+        else:
+            std_max_rounds = 3
+            st.session_state["std_max_rounds"] = 3
+            st.caption("Fixed: 3")
+    with cfg6:
+        if std_adaptive:
+            std_samples_per_round = st.slider("Samples per Round", 2, 8, 4, key="std_samples_per_round")
+        else:
+            std_samples_per_round = 4
+            st.session_state["std_samples_per_round"] = 4
+            st.caption("Fixed: 4")
+
+    cfg7, cfg8 = st.columns([1, 1])
+    with cfg7:
+        std_epochs = st.slider(
+            "Epochs per Scenario",
+            1,
+            5,
+            1,
+            key="std_epochs",
+            help="Displayed for run planning. Current backend uses one execution pass.",
+        )
+    with cfg8:
+        std_frameworks = st.multiselect(
+            "Frameworks Under Test",
+            STANDARD_FRAMEWORK_OPTIONS,
+            default=["EU AI Act", "GDPR", "NIST RMF 2.0"],
+            key="std_frameworks",
+            help="Displayed in run context and results framing.",
+        )
+
+    st.markdown("</div>", unsafe_allow_html=True)
+    std_config = {
+        "agent": std_agent,
+        "agent_model": std_agent_model,
+        "scorer_model": std_scorer_model,
+        "adaptive": std_adaptive,
+        "frameworks": std_frameworks,
+        "epochs": std_epochs,
+        "max_rounds": std_max_rounds,
+        "samples_per_round": std_samples_per_round,
+    }
+
     col_main, col_info = st.columns([2, 1])
 
     with col_info:
-        render_agent_info(config)
-        fws = config.get("frameworks") or ["EU AI Act", "GDPR", "NIST RMF 2.0"]
+        render_agent_info(std_config)
+        fws = std_config.get("frameworks") or ["EU AI Act", "GDPR", "NIST RMF 2.0"]
         fw_items = "".join(
             f'<div style="display:flex;align-items:center;gap:8px;padding:5px 0;">'
             f'<svg width="10" height="10" viewBox="0 0 10 10">'
@@ -283,20 +400,57 @@ with tab_standard:
         with b1:
             run_clicked = st.button("RUN EVALUATION", use_container_width=True, key="std_run")
         with b2:
-            adaptive_run = st.button("ADAPTIVE RUN", use_container_width=True, key="std_adaptive")
+            adaptive_run = st.button(
+                "ADAPTIVE RUN",
+                use_container_width=True,
+                key="std_adaptive_run_button",
+            )
         with b3:
             st.button("ABORT", use_container_width=True, key="std_abort")
 
         st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
-        std_mcp_links_raw = st.text_area(
-            "MCP Registry Links (optional)",
-            key="std_mcp_registry_links",
-            height=80,
+        std_mcp_server_command = st.text_input(
+            "MCP Server Command (optional)",
+            key="std_mcp_server_command",
             help=(
-                "One http(s) registry URL per line. "
-                "Used by backend sandbox runtime for MCP manifest resolution."
+                "Executable used to start an MCP server. "
+                "Example: `uvx`, `python`, or `node`."
             ),
         )
+        std_mcp_server_args_raw = st.text_area(
+            "MCP Server Arguments (optional)",
+            key="std_mcp_server_args",
+            height=70,
+            help=(
+                "Space-separated arguments (recommended) or JSON array. "
+                "Example: `--jira-url https://... --jira-username user --jira-token token`."
+            ),
+        )
+        try:
+            std_mcp_server_args = _parse_mcp_arg_string(std_mcp_server_args_raw)
+        except Exception as exc:
+            st.error(f"Invalid MCP arg format: {exc}")
+            std_mcp_server_args = None
+        std_mcp_urls_raw = st.text_area(
+            "MCP Server URLs (optional)",
+            key="std_mcp_server_urls",
+            height=80,
+            help=(
+                "One MCP endpoint per line. Examples: "
+                "`https://your-host/mcp` (streamable-http default) or "
+                "`sse|https://your-host/sse`."
+            ),
+        )
+        std_mcp_server_urls = [
+            line.strip() for line in (std_mcp_urls_raw or "").splitlines() if line.strip()
+        ]
+        with st.expander("Legacy MCP Registry Links (optional)", expanded=False):
+            std_mcp_links_raw = st.text_area(
+                "MCP Registry Links (one URL per line)",
+                key="std_mcp_registry_links",
+                height=70,
+                help="Optional manifest URLs for command-based MCP launch.",
+            )
         std_mcp_registry_links = [
             line.strip() for line in (std_mcp_links_raw or "").splitlines() if line.strip()
         ]
@@ -309,30 +463,182 @@ with tab_standard:
         if run_clicked or adaptive_run:
             _render_panel("EVALUATION IN PROGRESS", "rgba(0,212,255,0.25)")
 
-            if alive:
+            if std_mcp_server_args is None:
+                st.error("Fix MCP argument format before starting the run.")
+            elif alive:
                 with st.status("Initializing Agent-Force Engine...", expanded=True) as status_box:
                     run_id = start_run(
-                        agents=[config.get("agent", "email")],
-                        adaptive=config.get("adaptive", False) or adaptive_run,
-                        agent_model=config.get("agent_model"),
-                        scorer_model=config.get("scorer_model"),
-                        max_rounds=config.get("max_rounds", 3),
-                        samples_per_round=config.get("samples_per_round", 4),
+                        agents=[std_config.get("agent", "email")],
+                        adaptive=std_config.get("adaptive", False) or adaptive_run,
+                        agent_model=std_config.get("agent_model"),
+                        scorer_model=std_config.get("scorer_model"),
+                        max_rounds=std_config.get("max_rounds", 3),
+                        samples_per_round=std_config.get("samples_per_round", 4),
                         mcp_registry_links=std_mcp_registry_links,
+                        mcp_server_urls=std_mcp_server_urls,
+                        mcp_server_command=(std_mcp_server_command or "").strip() or None,
+                        mcp_server_args=std_mcp_server_args or [],
                     )
 
                     if run_id:
                         st.session_state["last_run_id"] = run_id
                         prog = st.progress(0)
                         log_lines, log_ph = [], st.empty()
+                        interaction_ph = st.empty()
+                        tool_history_ph = st.empty()
+                        interaction_rows: list[dict] = []
+                        tool_history_rows: list[dict] = []
                         max_scenarios = max(len(scenarios), 1)
+                        completed_samples = 0
+                        observed_total = max_scenarios
 
                         for i, event in enumerate(stream_run(run_id)):
-                            msg = event.get("message", event.get("type", str(event)))
-                            log_lines.append(f"> {msg}")
-                            prog.progress(min(int((i / max_scenarios) * 100), 99))
+                            event_type = str(event.get("type", "event"))
+                            agent_name = str(event.get("agent", std_config.get("agent", "agent")))
+                            sample_index = int(event.get("sample_index") or 0)
+                            total_samples = int(event.get("total_samples") or observed_total or max_scenarios)
+                            observed_total = max(observed_total, total_samples)
+
+                            if event_type == "sample_start":
+                                prompt = str(event.get("input", "")).strip()
+                                log_lines.append(f"[{agent_name}] sample {sample_index}/{observed_total} started")
+                                if prompt:
+                                    interaction_rows.append(
+                                        {
+                                            "sample": sample_index,
+                                            "role": "user",
+                                            "text": prompt[:260],
+                                        }
+                                    )
+                            elif event_type == "tool_call":
+                                tool_name = str(event.get("tool_name", "unknown_tool"))
+                                tool_input = json.dumps(event.get("tool_input", {}), ensure_ascii=True)
+                                tool_output = str(event.get("tool_output", ""))
+                                log_lines.append(
+                                    f"[{agent_name}] sample {sample_index} tool {tool_name}"
+                                )
+                                tool_history_rows.append(
+                                    {
+                                        "agent": agent_name,
+                                        "sample": sample_index,
+                                        "tool": tool_name,
+                                        "input": tool_input[:160],
+                                        "output": tool_output[:200],
+                                    }
+                                )
+                                interaction_rows.append(
+                                    {
+                                        "sample": sample_index,
+                                        "role": f"tool:{tool_name}",
+                                        "text": f"in={tool_input[:120]} | out={tool_output[:120]}",
+                                    }
+                                )
+                            elif event_type == "sample_result":
+                                completed_samples = max(completed_samples, sample_index)
+                                score = float(event.get("score", 0.0))
+                                level = str(event.get("level", "unknown")).upper()
+                                fallback_used = bool(event.get("fallback_used", False))
+                                fallback_reason = str(event.get("fallback_reason", "")).strip()
+                                agent_output = str(event.get("agent_output", "")).strip()
+                                judge_explanation = str(event.get("judge_explanation", "")).strip()
+                                sample_tool_calls = event.get("tool_calls", [])
+
+                                log_lines.append(
+                                    f"[{agent_name}] sample {sample_index}/{observed_total} "
+                                    f"{level} score={score:.2f}"
+                                )
+                                if fallback_used:
+                                    note = fallback_reason[:160] if fallback_reason else "live run failed"
+                                    log_lines.append(f"[{agent_name}] fallback to deterministic: {note}")
+
+                                if agent_output:
+                                    interaction_rows.append(
+                                        {
+                                            "sample": sample_index,
+                                            "role": "agent",
+                                            "text": agent_output[:260],
+                                        }
+                                    )
+                                if judge_explanation:
+                                    interaction_rows.append(
+                                        {
+                                            "sample": sample_index,
+                                            "role": "judge",
+                                            "text": judge_explanation[:260],
+                                        }
+                                    )
+                                if isinstance(sample_tool_calls, list):
+                                    for call in sample_tool_calls[:5]:
+                                        if not isinstance(call, dict):
+                                            continue
+                                        tool_name = str(call.get("tool", "unknown_tool"))
+                                        tool_input = json.dumps(call.get("input", {}), ensure_ascii=True)
+                                        tool_output = str(call.get("output", ""))
+                                        tool_history_rows.append(
+                                            {
+                                                "agent": agent_name,
+                                                "sample": sample_index,
+                                                "tool": tool_name,
+                                                "input": tool_input[:160],
+                                                "output": tool_output[:200],
+                                            }
+                                        )
+                            elif event_type == "sample_agent_error":
+                                log_lines.append(
+                                    f"[{agent_name}] sample {sample_index} agent error: "
+                                    f"{str(event.get('error', 'unknown'))[:180]}"
+                                )
+                            elif event_type == "sample_scorer_error":
+                                log_lines.append(
+                                    f"[{agent_name}] sample {sample_index} scorer error: "
+                                    f"{str(event.get('error', 'unknown'))[:180]}"
+                                )
+                            elif event_type == "agent_complete":
+                                level = str(event.get("level", "unknown")).upper()
+                                score = float(event.get("score", 0.0))
+                                log_lines.append(
+                                    f"[{agent_name}] complete {level} score={score:.2f}"
+                                )
+                            elif event_type == "agent_error":
+                                log_lines.append(
+                                    f"[{agent_name}] error: {str(event.get('error', 'unknown'))[:180]}"
+                                )
+                            elif event_type == "done":
+                                log_lines.append("[system] run complete")
+                            else:
+                                msg = event.get("message", event_type)
+                                log_lines.append(f"[{agent_name}] {msg}")
+
+                            if observed_total > 0:
+                                progress_pct = min(int((completed_samples / observed_total) * 100), 99)
+                            else:
+                                progress_pct = min(int((i / max_scenarios) * 100), 99)
+                            prog.progress(progress_pct)
+
                             with log_ph.container():
                                 render_live_log(log_lines)
+                            with interaction_ph.container():
+                                st.markdown("**Live Interaction**")
+                                if interaction_rows:
+                                    st.dataframe(
+                                        interaction_rows[-24:],
+                                        use_container_width=True,
+                                        hide_index=True,
+                                        height=240,
+                                    )
+                                else:
+                                    st.caption("Waiting for interaction events...")
+                            with tool_history_ph.container():
+                                st.markdown("**Tool Call History**")
+                                if tool_history_rows:
+                                    st.dataframe(
+                                        tool_history_rows[-24:],
+                                        use_container_width=True,
+                                        hide_index=True,
+                                        height=240,
+                                    )
+                                else:
+                                    st.caption("No tool calls yet.")
 
                         prog.progress(100)
                         status_box.update(label="Evaluation Complete!", state="complete", expanded=False)
@@ -349,7 +655,7 @@ with tab_standard:
                         st.session_state["eval_done"] = True
                         st.switch_page("pages/3_results.py")
 
-            st.markdown("</div>", unsafe_allow_html=True)
+                        st.markdown("</div>", unsafe_allow_html=True)
 
 with tab_attack:
     st.markdown(
@@ -400,7 +706,7 @@ with tab_attack:
 - `Resilience Stress`: higher pressure on compaction, stop-channel, confirmation, and batching failure modes.
 
 **Target Source**
-- `Sandbox Agent`: built-in world profile (`email`, `web_search`, `code_exec`) with optional MCP registry links.
+- `Sandbox Agent`: built-in world profile (`email`, `web_search`, `code_exec`) with optional direct MCP URLs or registry links.
 - `Custom HTTP Agent`: your real agent endpoint for live plug-and-play testing.
 - `Mock Scripted Agent`: deterministic scripted responses for reproducible demos.
 
@@ -422,7 +728,7 @@ with tab_attack:
         "jira": "jira.search_issues,jira.get_issue,jira.add_comment,jira.transition_issue",
         "default": "files.read,email.read,email.archive,email.delete",
     }
-    default_agent = config.get("agent", "email")
+    default_agent = st.session_state.get("std_agent", "email")
     if "attack_tools_input" not in st.session_state:
         st.session_state["attack_tools_input"] = default_tools.get(default_agent, default_tools["default"])
     if "attack_use_case" not in st.session_state:
@@ -435,6 +741,12 @@ with tab_attack:
         )
     if "attack_mcp_registry_links" not in st.session_state:
         st.session_state["attack_mcp_registry_links"] = ""
+    if "attack_mcp_server_urls" not in st.session_state:
+        st.session_state["attack_mcp_server_urls"] = ""
+    if "attack_mcp_server_command" not in st.session_state:
+        st.session_state["attack_mcp_server_command"] = ""
+    if "attack_mcp_server_args" not in st.session_state:
+        st.session_state["attack_mcp_server_args"] = ""
     if "attack_http_endpoint" not in st.session_state:
         st.session_state["attack_http_endpoint"] = "http://127.0.0.1:9000/invoke"
     if "attack_http_auth" not in st.session_state:
@@ -523,11 +835,42 @@ with tab_attack:
                 ["full", "summary"],
                 help="Controls sandbox trace artifact detail level.",
             )
+            attack_mcp_server_command = st.text_input(
+                "MCP Server Command (optional)",
+                key="attack_mcp_server_command",
+                help=(
+                    "Executable used to launch the MCP server for this sandbox target. "
+                    "Example: `uvx`, `python`, or `node`."
+                ),
+            )
+            attack_mcp_server_args_raw = st.text_area(
+                "MCP Server Arguments (optional)",
+                key="attack_mcp_server_args",
+                height=70,
+                help=(
+                    "Space-separated arguments (recommended) or JSON array. "
+                    "Example: `--jira-url https://... --jira-username user --jira-token token`."
+                ),
+            )
+            try:
+                attack_mcp_server_args = _parse_mcp_arg_string(attack_mcp_server_args_raw)
+            except Exception as exc:
+                st.error(f"Invalid MCP arg format: {exc}")
+                attack_mcp_server_args = None
             st.text_area(
-                "MCP Registry Links (one URL per line)",
-                key="attack_mcp_registry_links",
+                "MCP Server URLs (one URL per line)",
+                key="attack_mcp_server_urls",
                 height=80,
-                help="Optional MCP registry URLs for sandbox-side manifest resolution.",
+                help=(
+                    "Direct MCP endpoints for live connections. Examples: "
+                    "`https://your-host/mcp` or `sse|https://your-host/sse`."
+                ),
+            )
+            st.text_area(
+                "MCP Registry Links (optional)",
+                key="attack_mcp_registry_links",
+                height=70,
+                help="Optional manifest URLs for command-based MCP launch.",
             )
         elif target_mode == "Custom HTTP Agent":
             target_endpoint = st.text_input(
@@ -604,11 +947,21 @@ with tab_attack:
     tools = _parse_csv_items(tools_input)
     policies = [line.strip() for line in policy_input.splitlines() if line.strip()]
     tool_specs = _build_tool_specs(tools)
+    mcp_server_urls = [
+        line.strip()
+        for line in (st.session_state.get("attack_mcp_server_urls", "") or "").splitlines()
+        if line.strip()
+    ]
     mcp_registry_links = [
         line.strip()
         for line in (st.session_state.get("attack_mcp_registry_links", "") or "").splitlines()
         if line.strip()
     ]
+    attack_mcp_server_command = (st.session_state.get("attack_mcp_server_command", "") or "").strip() or None
+    try:
+        attack_mcp_server_args = _parse_mcp_arg_string(st.session_state.get("attack_mcp_server_args", ""))
+    except Exception:
+        attack_mcp_server_args = None
 
     agent_card = {
         "use_case": use_case or "General assistant",
@@ -672,12 +1025,17 @@ with tab_attack:
         with st.status("Running sandbox attack campaign...", expanded=True) as status_box:
             try:
                 if target_mode == "Sandbox Agent":
+                    if attack_mcp_server_args is None:
+                        raise ValueError("Invalid MCP arg format for attack target.")
                     target_agent_payload = {
                         "type": "world_sandbox",
                         "sandbox_agent": sandbox_agent,
                         "world_pack": target_world_pack or "acme_corp_v1",
                         "demo_mode": target_demo_mode,
                         "trace_level": target_trace_level,
+                        "mcp_server_command": attack_mcp_server_command,
+                        "mcp_server_args": attack_mcp_server_args or [],
+                        "mcp_server_urls": mcp_server_urls,
                         "mcp_registry_links": mcp_registry_links,
                     }
                 elif target_mode == "Custom HTTP Agent":

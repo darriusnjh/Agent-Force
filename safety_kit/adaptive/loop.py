@@ -133,6 +133,8 @@ class AdaptiveEvalLoop:
                 scorer=task.scorer,
                 sandbox=task.sandbox,
                 epochs=task.epochs,
+                tool_policy=task.tool_policy,
+                on_event=task.on_event,
             )
 
             if self.verbose:

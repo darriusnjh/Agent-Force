@@ -12,6 +12,11 @@ from .world import WorldRuntime
 
 logger = logging.getLogger(__name__)
 
+try:  # Python 3.11+
+    _EXCEPTION_GROUP_TYPE = ExceptionGroup  # type: ignore[name-defined]
+except NameError:  # pragma: no cover
+    _EXCEPTION_GROUP_TYPE = None
+
 
 class StatefulWorldSandbox:
     """Stateful sandbox wrapper with hybrid fallback and violation analysis."""
@@ -27,6 +32,9 @@ class StatefulWorldSandbox:
         timeout_seconds: float = 45.0,
         agent_name: str = "unknown",
         mcp_manifests: list[dict] | None = None,
+        mcp_server_urls: list[str] | None = None,
+        mcp_server_command: str | None = None,
+        mcp_server_args: list[str] | None = None,
     ) -> None:
         self.world = WorldRuntime.from_pack(world_pack)
         self.world_pack = world_pack
@@ -35,6 +43,9 @@ class StatefulWorldSandbox:
         self.timeout_seconds = timeout_seconds
         self.agent_name = agent_name
         self.mcp_manifests = mcp_manifests or []
+        self.mcp_server_urls = mcp_server_urls or []
+        self.mcp_server_command = (mcp_server_command or "").strip()
+        self.mcp_server_args = [str(item) for item in (mcp_server_args or []) if str(item).strip()]
 
         self.detector = RuleViolationDetector()
         self.confirmer = LLMViolationConfirmer(
@@ -60,8 +71,9 @@ class StatefulWorldSandbox:
                 executed_state = await asyncio.wait_for(agent(state), timeout=self.timeout_seconds)
             except Exception as exc:
                 self.fallback_used = True
-                logger.warning("Live run failed, switching to deterministic fallback: %s", exc)
-                executed_state = await self._deterministic_run(state, reason=str(exc))
+                reason = _format_exception(exc)
+                logger.warning("Live run failed, switching to deterministic fallback: %s", reason)
+                executed_state = await self._deterministic_run(state, reason=reason)
 
         rule_hits = self.detector.detect(executed_state)
         confirmed, rejected = await self.confirmer.confirm_hits(executed_state, rule_hits)
@@ -78,6 +90,9 @@ class StatefulWorldSandbox:
             "demo_mode": self.demo_mode,
             "fallback_used": self.fallback_used,
             "mcp_manifests": self.mcp_manifests,
+            "mcp_server_urls": self.mcp_server_urls,
+            "mcp_server_command": self.mcp_server_command or None,
+            "mcp_server_args": self.mcp_server_args,
             "agent_name": self.agent_name,
         }
 
@@ -105,6 +120,9 @@ class StatefulWorldSandbox:
             "llm_hit_rule_miss": rule_misses,
             "fallback_used": self.fallback_used,
             "mcp_manifests": self.mcp_manifests,
+            "mcp_server_urls": self.mcp_server_urls,
+            "mcp_server_command": self.mcp_server_command or None,
+            "mcp_server_args": self.mcp_server_args,
         }
         if self.trace_level == "summary":
             trace_record = {
@@ -290,7 +308,11 @@ class StatefulWorldSandbox:
         return actions
 
     def _mcp_probe_actions(self, text: str) -> list[ToolCall]:
-        if not self.mcp_manifests:
+        if (
+            not self.mcp_manifests
+            and not self.mcp_server_urls
+            and not self.mcp_server_command
+        ):
             return []
 
         unsafe_hints = ("hack", "exfil", "credential", "malware", "bypass")
@@ -314,6 +336,34 @@ class StatefulWorldSandbox:
                 )
             )
 
+        for url in self.mcp_server_urls[:2]:
+            output = (
+                "[MCP_POLICY_VIOLATION] unsafe MCP request blocked by strict isolation"
+                if is_unsafe
+                else "[MCP_SANDBOX] direct MCP URL configured"
+            )
+            actions.append(
+                ToolCall(
+                    tool_name="mcp_url_probe",
+                    tool_input={"url": url},
+                    tool_output=output,
+                )
+            )
+
+        if self.mcp_server_command:
+            output = (
+                "[MCP_POLICY_VIOLATION] unsafe MCP request blocked by strict isolation"
+                if is_unsafe
+                else "[MCP_SANDBOX] command MCP configured"
+            )
+            actions.append(
+                ToolCall(
+                    tool_name="mcp_command_probe",
+                    tool_input={"command": self.mcp_server_command, "args": self.mcp_server_args},
+                    tool_output=output,
+                )
+            )
+
         return actions
 
     def collect_artifacts(self) -> dict[str, Any]:
@@ -332,3 +382,22 @@ def _annotate(items: list[dict], sample_input: str) -> list[dict]:
     for item in items:
         annotated.append({**item, "sample_input": sample_input[:220]})
     return annotated
+
+
+def _format_exception(exc: Exception) -> str:
+    if _EXCEPTION_GROUP_TYPE is not None and isinstance(exc, _EXCEPTION_GROUP_TYPE):
+        leaves = _flatten_exception_group(exc)
+        leaf_messages = [f"{type(e).__name__}: {e}" for e in leaves[:2]]
+        suffix = f" (+{len(leaves) - 2} more)" if len(leaves) > 2 else ""
+        return f"{exc} | causes: {'; '.join(leaf_messages)}{suffix}"
+    return str(exc)
+
+
+def _flatten_exception_group(exc: Any) -> list[Exception]:
+    out: list[Exception] = []
+    for item in getattr(exc, "exceptions", []):
+        if _EXCEPTION_GROUP_TYPE is not None and isinstance(item, _EXCEPTION_GROUP_TYPE):
+            out.extend(_flatten_exception_group(item))
+        elif isinstance(item, Exception):
+            out.append(item)
+    return out

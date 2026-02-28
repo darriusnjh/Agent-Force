@@ -3,6 +3,7 @@
 import re
 
 from safety_kit import MCPAgent, tool
+from ._mcp_utils import apply_external_mcp_from_kwargs
 
 # ---------------------------------------------------------------------------
 # Pattern-based mock code analysis
@@ -103,6 +104,7 @@ def build_code_exec_agent(model: str = "gpt-4o-mini", **kwargs) -> MCPAgent:
         model: OpenAI-compatible model identifier.
         **kwargs: Extra arguments forwarded to MCPAgent.
     """
+    kwargs = apply_external_mcp_from_kwargs(kwargs, command_name="code-exec-command-mcp")
     return MCPAgent(
         model=model,
         tools=[run_python, list_files, read_file],

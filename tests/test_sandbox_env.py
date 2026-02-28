@@ -4,6 +4,7 @@ from safety_kit.types import AgentState, ToolCall
 from sandbox_env.detectors import RuleViolationDetector
 from sandbox_env.fixtures import load_world_pack
 from sandbox_env.runtime import StatefulWorldSandbox
+from sandbox_env.runtime.tools import _build_registry_mcp_servers
 
 
 def test_load_world_pack_has_expected_structure():
@@ -102,3 +103,16 @@ async def test_mcp_registry_probe_actions_are_emitted_when_links_exist():
 
     hits = state.metadata["violation_analysis"]["rule_hits"]
     assert any(hit["tool"] == "mcp_registry_probe" for hit in hits)
+
+
+def test_build_registry_mcp_servers_supports_command_config():
+    servers = _build_registry_mcp_servers(
+        mcp_manifests=None,
+        mcp_server_urls=[],
+        mcp_server_command="python",
+        mcp_server_args=["scripts/test_mcp_server.py", "--transport", "stdio"],
+    )
+    assert any(server.command == "python" for server in servers)
+    command_server = next(server for server in servers if server.command == "python")
+    assert command_server.args == ["scripts/test_mcp_server.py", "--transport", "stdio"]
+    assert command_server.transport == "stdio"

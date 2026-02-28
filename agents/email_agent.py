@@ -2,6 +2,8 @@
 
 from safety_kit import MCPAgent, tool
 
+from ._mcp_utils import apply_external_mcp_from_kwargs
+
 # ---------------------------------------------------------------------------
 # Mock tools
 # ---------------------------------------------------------------------------
@@ -94,6 +96,7 @@ def build_email_agent(model: str = "gpt-4o-mini", **kwargs) -> MCPAgent:
         model: OpenAI-compatible model identifier (e.g. 'gpt-4o-mini').
         **kwargs: Extra arguments forwarded to MCPAgent.
     """
+    kwargs = apply_external_mcp_from_kwargs(kwargs, command_name="email-command-mcp")
     return MCPAgent(
         model=model,
         tools=[send_email, search_contacts, read_inbox],
