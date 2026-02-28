@@ -65,14 +65,6 @@ STANDARD_JUDGE_MODEL_OPTIONS = [
     "anthropic/claude-3-5-sonnet",
     "groq/llama-3.1-70b-versatile",
 ]
-STANDARD_FRAMEWORK_OPTIONS = [
-    "EU AI Act",
-    "GDPR",
-    "NIST RMF 2.0",
-    "ISO 27001",
-    "SOC 2",
-    "CCPA",
-]
 
 
 def _parse_csv_items(raw: str) -> list[str]:
@@ -321,24 +313,14 @@ with tab_standard:
             st.session_state["std_samples_per_round"] = 4
             st.caption("Fixed: 4")
 
-    cfg7, cfg8 = st.columns([1, 1])
-    with cfg7:
-        std_epochs = st.slider(
-            "Epochs per Scenario",
-            1,
-            5,
-            1,
-            key="std_epochs",
-            help="Displayed for run planning. Current backend uses one execution pass.",
-        )
-    with cfg8:
-        std_frameworks = st.multiselect(
-            "Frameworks Under Test",
-            STANDARD_FRAMEWORK_OPTIONS,
-            default=["EU AI Act", "GDPR", "NIST RMF 2.0"],
-            key="std_frameworks",
-            help="Displayed in run context and results framing.",
-        )
+    std_epochs = st.slider(
+        "Epochs per Scenario",
+        1,
+        5,
+        1,
+        key="std_epochs",
+        help="Displayed for run planning. Current backend uses one execution pass.",
+    )
 
     cfg9, cfg10, cfg11 = st.columns(3)
     with cfg9:
@@ -377,7 +359,6 @@ with tab_standard:
         "agent_model": std_agent_model,
         "scorer_model": std_scorer_model,
         "adaptive": std_adaptive,
-        "frameworks": std_frameworks,
         "epochs": std_epochs,
         "max_rounds": std_max_rounds,
         "samples_per_round": std_samples_per_round,
@@ -390,27 +371,6 @@ with tab_standard:
 
     with col_info:
         render_agent_info(std_config)
-        fws = std_config.get("frameworks") or ["EU AI Act", "GDPR", "NIST RMF 2.0"]
-        fw_items = "".join(
-            f'<div style="display:flex;align-items:center;gap:8px;padding:5px 0;">'
-            f'<svg width="10" height="10" viewBox="0 0 10 10">'
-            f'<polygon points="5,0 10,5 5,10 0,5" fill="{COLORS["safe"]}"/></svg>'
-            f'<span style="font-size:13px;color:{COLORS["text"]};">{fw}</span>'
-            f"</div>"
-            for fw in fws
-        )
-        st.markdown(
-            f"""
-<div style="background:{COLORS['panel']};border:1px solid rgba(123,97,255,0.2);
-            border-radius:12px;padding:20px 22px;margin-bottom:14px;">
-  <div style="font-family:'Space Mono',monospace;font-size:9px;color:{COLORS['text_dim']};
-              letter-spacing:0.12em;text-transform:uppercase;margin-bottom:14px;">
-    FRAMEWORKS UNDER TEST
-  </div>
-  {fw_items}
-</div>""",
-            unsafe_allow_html=True,
-        )
 
     with col_main:
         status_color = COLORS["safe"] if alive else COLORS["warn"]

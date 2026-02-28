@@ -4,79 +4,8 @@ import streamlit as st
 from config import COLORS, score_color
 from components.metric_cards import (
     badge_html, score_ring_html, compliant_badge,
-    framework_badge, severity_badge, section_label
+    severity_badge, section_label
 )
-
-
-def _render_control_relevance(control_relevance: dict):
-    controls = control_relevance.get("relevant_standards_controls", []) or []
-    if not controls:
-        return
-
-    st.markdown(
-        f"""
-<div style="font-family:'Space Mono',monospace;font-size:9px;color:{COLORS['accent2']};
-            letter-spacing:0.1em;text-transform:uppercase;margin:14px 0 8px 0;">
-  Control Relevance
-</div>
-""",
-        unsafe_allow_html=True,
-    )
-
-    st.dataframe(
-        [
-            {
-                "standard": item.get("standard", ""),
-                "control_id": item.get("control_id", ""),
-                "control_intent": item.get("control_intent", ""),
-            }
-            for item in controls
-        ],
-        hide_index=True,
-        use_container_width=True,
-    )
-
-    why_text = str(control_relevance.get("why_it_matters", "")).strip()
-    if why_text:
-        st.markdown(
-            f"""
-<div style="background:rgba(0,212,255,0.05);border:1px solid rgba(0,212,255,0.2);
-            border-radius:8px;padding:12px 14px;margin-top:10px;">
-  <div style="font-family:'Space Mono',monospace;font-size:9px;color:{COLORS['accent']};
-              letter-spacing:0.1em;margin-bottom:6px;">WHY IT MATTERS</div>
-  <div style="font-size:12px;color:{COLORS['text_dim']};line-height:1.6;">{why_text}</div>
-</div>
-""",
-            unsafe_allow_html=True,
-        )
-
-    evidence_lines = control_relevance.get("evidence_from_run_logs", []) or []
-    if evidence_lines:
-        st.markdown(
-            f"""
-<div style="font-family:'Space Mono',monospace;font-size:9px;color:{COLORS['accent3']};
-            letter-spacing:0.1em;margin:12px 0 6px 0;">
-  EVIDENCE FROM RUN LOGS
-</div>
-""",
-            unsafe_allow_html=True,
-        )
-        for line in evidence_lines:
-            st.markdown(f"- {line}")
-
-    checklist = control_relevance.get("suggested_remediation_checklist", []) or []
-    if checklist:
-        st.markdown(
-            f"""
-<div style="font-family:'Space Mono',monospace;font-size:9px;color:{COLORS['warn']};
-            letter-spacing:0.1em;margin:10px 0 6px 0;">
-  SUGGESTED REMEDIATION CHECKLIST
-</div>
-""",
-            unsafe_allow_html=True,
-        )
-        for item in checklist:
-            st.markdown(f"- [ ] {item}")
 
 
 def render_result_cards(results: list[dict]):
@@ -98,7 +27,6 @@ def render_result_cards(results: list[dict]):
     {score_ring_html(r['score'], size=50, stroke=5)}
   </div>
   <div style="display:flex;gap:6px;flex-wrap:wrap;">
-    {framework_badge(r['framework'])}
     {compliant_badge(r['compliant'])}
   </div>
 </div>""", unsafe_allow_html=True)
@@ -117,25 +45,24 @@ def render_results_table(results: list[dict]):
             f"{r['id']} — {r['name']}  |  Score: {r['score']}%  |  {'✓ COMPLIANT' if r['compliant'] else '✗ VIOLATION'}",
             expanded=not r["compliant"],
         ):
-            col1, col2, col3, col4, col5 = st.columns([1, 1.5, 1.2, 1.2, 1])
+            col1, col2, col3, col4 = st.columns([1, 2.2, 1.2, 1])
             with col1:
                 st.markdown(score_ring_html(r["score"], size=64, stroke=6),
                             unsafe_allow_html=True)
             with col2:
                 st.markdown(f"""
 <div style="font-size:13px;color:{COLORS['text']};font-weight:600;margin-bottom:8px;">{r['name']}</div>
-{framework_badge(r['framework'])}
 """, unsafe_allow_html=True)
             with col3:
                 st.markdown(f"""
 <div style="font-family:'Space Mono',monospace;font-size:9px;color:{COLORS['text_dim']};
             letter-spacing:0.1em;margin-bottom:6px;">ARTICLE</div>
 <div style="font-family:'JetBrains Mono',monospace;font-size:14px;
-            color:{COLORS['accent2']};font-weight:700;">{r['article']}</div>
+            color:{COLORS['accent2']};font-weight:700;">{r.get('article', '-')}</div>
 """, unsafe_allow_html=True)
             with col4:
                 st.markdown(f"{severity_badge(r['severity'])}", unsafe_allow_html=True)
-            with col5:
+                st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
                 st.markdown(compliant_badge(r["compliant"]), unsafe_allow_html=True)
 
             st.markdown(f"""
@@ -145,10 +72,6 @@ def render_results_table(results: list[dict]):
                color:{COLORS['accent']};letter-spacing:0.08em;">JUDGE REASONING: </span>
   <span style="font-size:13px;color:{COLORS['text_dim']};line-height:1.7;">{r['reason']}</span>
 </div>""", unsafe_allow_html=True)
-
-            control_relevance = r.get("control_relevance") or {}
-            if not r["compliant"] and control_relevance:
-                _render_control_relevance(control_relevance)
 
 def render_violations_summary(results):
     """Renders a self-contained box of failed scenarios."""

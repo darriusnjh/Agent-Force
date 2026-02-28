@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import Any
 
-from ..governance import enrich_attack_findings_with_controls, summarize_control_mapping
 from .detectors import Detectors, RuleBasedJudge, classify_taxonomy
 from .erl import ReflectionEngine, ReflectionMemory, RewardConfig, RewardModel
 from .generator import SafeTemplateGenerator
@@ -511,8 +510,7 @@ async def run_attack(
     safety_decay = _summarize_safety_decay(reward_log)
     autonomy_stress = _summarize_autonomy_stress(reward_log)
     risk_evolution = _build_risk_evolution(reward_log)
-    mapped_findings = enrich_attack_findings_with_controls([asdict(f) for f in state.findings])
-    control_mapping = summarize_control_mapping(mapped_findings)
+    findings = [asdict(f) for f in state.findings]
 
     return {
         "run_id": state.run_id,
@@ -529,9 +527,9 @@ async def run_attack(
                 sum(float(r.get("reward", 0.0)) for r in reward_log) / max(1, len(reward_log)),
                 2,
             ),
-            "autonomy_stress_index": autonomy_stress.get("autonomy_stress_index", 0.0),
+                "autonomy_stress_index": autonomy_stress.get("autonomy_stress_index", 0.0),
         },
-        "findings": mapped_findings,
+        "findings": findings,
         "attack_memory": state.attack_memory,
         "reflection_memory": state.reflection_memory,
         "reward_log": reward_log,
@@ -540,7 +538,6 @@ async def run_attack(
         "autonomy_stress": autonomy_stress,
         "safety_decay": safety_decay,
         "risk_evolution": risk_evolution,
-        "control_mapping": control_mapping,
         "tests": tests,
         "timeline": timeline,
         "campaign": payload.get("campaign", {}),
