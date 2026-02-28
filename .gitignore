@@ -208,3 +208,6 @@ __marimo__/
 artifacts/
 test_artifacts/
 test_runs.json
+runs.json
+*_agent_safety_report.json
+adaptive_*_report.json

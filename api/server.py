@@ -1,11 +1,13 @@
 """FastAPI server — Agent-Force evaluation API.
 
 Endpoints:
-    POST /runs                  -> start a new evaluation run (returns run_id)
-    GET  /runs                  -> list all past runs
-    GET  /runs/{run_id}         -> compact run summary by default; full scorecard with ?view=full
-    GET  /runs/{run_id}/stream  -> SSE stream of live progress events
-    GET  /health                -> liveness check
+    POST /runs                         -> start a new evaluation run (returns run_id)
+    POST /attack/runs                  -> start a defensive attack/test run
+    POST /attack/scenarios/generate    -> generate contextualized test scenarios
+    GET  /runs                         -> list all past runs
+    GET  /runs/{run_id}                -> compact run summary by default; full scorecard with ?view=full
+    GET  /runs/{run_id}/stream         -> SSE stream of live progress events
+    GET  /health                       -> liveness check
 """
 
 from __future__ import annotations
@@ -21,7 +23,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .store import RunStore
 
@@ -30,6 +32,15 @@ load_dotenv()
 AGENT_MODEL = os.getenv("AGENT_MODEL", "openai/gpt-4o-mini")
 SCORER_MODEL = os.getenv("SCORER_MODEL", "openai/gpt-4o-mini")
 ADAPTIVE_MODEL = os.getenv("ADAPTIVE_MODEL", SCORER_MODEL)
+
+ATTACK_DEFAULT_CATEGORIES = ["data_boundary", "tool_safety", "memory_integrity", "goal_drift"]
+ATTACK_OPENCLAW_CATEGORIES = [
+    "context_compaction_failure",
+    "confirmation_gate_failure",
+    "stop_failsafe_failure",
+    "batching_runaway",
+]
+ATTACK_VALID_CATEGORIES = set(ATTACK_DEFAULT_CATEGORIES + ATTACK_OPENCLAW_CATEGORIES)
 
 
 # ---------------------------------------------------------------------------
@@ -103,6 +114,69 @@ class RunRequest(BaseModel):
 class RunCreated(BaseModel):
     run_id: str
     status: str = "running"
+
+
+class AttackTarget(BaseModel):
+    """Target agent endpoint or mock target for attack testing."""
+
+    type: Literal["http", "mock", "world_sandbox"] = "world_sandbox"
+    endpoint: str | None = None
+    auth: str | None = None
+    mock_script: list[dict[str, Any]] | None = None
+    sandbox_agent: Literal["email", "web_search", "code_exec"] = "email"
+    world_pack: str = "acme_corp_v1"
+    demo_mode: Literal["live_hybrid", "deterministic"] = "deterministic"
+    trace_level: Literal["summary", "full"] = "full"
+    mcp_registry_links: list[str] = Field(default_factory=list)
+
+
+class AgentCard(BaseModel):
+    """Declarative target capabilities for planning and policy checks."""
+
+    use_case: str = "General assistant"
+    tools: list[str] = Field(default_factory=list)
+    tool_specs: list[dict[str, Any]] = Field(default_factory=list)
+    memory_mode: Literal["session", "persistent", "none"] = "session"
+    autonomy_level: Literal["suggest", "act_with_confirm", "act"] = "suggest"
+
+
+class AttackBudget(BaseModel):
+    max_tests: int = 20
+    max_tokens: int = 8000
+
+
+class AttackInboxConfig(BaseModel):
+    toy_count: int = 10
+    realistic_count: int = 5000
+    canary_count: int = 5
+
+
+class AttackRunRequest(BaseModel):
+    """Configuration for a new defensive attack/test run."""
+
+    target_agent: AttackTarget
+    agent_card: AgentCard
+    policies: list[str] = Field(default_factory=list)
+    categories: list[str] = Field(default_factory=list)
+    scenario_pack: Literal["default", "openclaw"] = "default"
+    require_sandbox: bool = True
+    max_turns: int = 8
+    budget: AttackBudget = Field(default_factory=AttackBudget)
+    inbox: AttackInboxConfig = Field(default_factory=AttackInboxConfig)
+    artifacts: dict[str, Any] = Field(default_factory=dict)
+
+
+class AttackScenarioRequest(BaseModel):
+    """Request model for dynamic scenario generation preview."""
+
+    agent_card: AgentCard
+    policies: list[str] = Field(default_factory=list)
+    categories: list[str] = Field(default_factory=list)
+    scenario_pack: Literal["default", "openclaw"] = "default"
+    max_turns: int = 8
+    per_category: int = 2
+    inbox: AttackInboxConfig = Field(default_factory=AttackInboxConfig)
+    artifacts: dict[str, Any] = Field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -367,6 +441,98 @@ async def _run_evaluation(run_id: str, req: RunRequest) -> None:
         await store.fail_run(run_id, str(exc), metadata=metadata)
 
 
+def _default_attack_artifacts(inbox_cfg: AttackInboxConfig | None = None) -> dict[str, Any]:
+    """Synthetic artifacts exposed to the attack sandbox."""
+    from safety_kit.attack import SyntheticInboxConfig, build_default_attack_artifacts
+
+    cfg = None
+    if inbox_cfg is not None:
+        cfg = SyntheticInboxConfig(
+            toy_count=max(1, int(inbox_cfg.toy_count)),
+            realistic_count=max(1, int(inbox_cfg.realistic_count)),
+            canary_count=max(0, int(inbox_cfg.canary_count)),
+        )
+    return build_default_attack_artifacts(cfg)
+
+
+def _resolve_attack_categories(categories: list[str], scenario_pack: str) -> list[str]:
+    if categories:
+        return categories
+    if scenario_pack == "openclaw":
+        return list(ATTACK_OPENCLAW_CATEGORIES)
+    return list(ATTACK_DEFAULT_CATEGORIES)
+
+
+async def _run_attack_campaign(run_id: str, req: AttackRunRequest) -> None:
+    """Execute defensive attack/test loop and persist findings."""
+    from safety_kit.attack import (
+        HttpTargetAdapter,
+        MockScriptedTargetAdapter,
+        SandboxToolProxy,
+        SandboxWrapper,
+        StatefulSandboxTargetAdapter,
+        build_default_tool_policy,
+        build_simulated_tools,
+        run_attack,
+    )
+
+    agent_card = req.agent_card.model_dump()
+    categories = _resolve_attack_categories(req.categories, req.scenario_pack)
+    policy = build_default_tool_policy(agent_card)
+    artifacts = _default_attack_artifacts(req.inbox)
+    artifacts.update(req.artifacts)
+
+    tool_proxy = SandboxToolProxy(
+        policy=policy,
+        simulated_tools=build_simulated_tools(artifacts),
+    )
+
+    if req.target_agent.type == "http":
+        if not req.target_agent.endpoint:
+            raise ValueError("target_agent.endpoint is required when type='http'")
+        target_adapter = HttpTargetAdapter(
+            endpoint=req.target_agent.endpoint,
+            auth=req.target_agent.auth,
+        )
+    elif req.target_agent.type == "world_sandbox":
+        target_adapter = StatefulSandboxTargetAdapter(
+            agent_profile=req.target_agent.sandbox_agent,
+            world_pack=req.target_agent.world_pack,
+            demo_mode=req.target_agent.demo_mode,
+            trace_level=req.target_agent.trace_level,
+            model=AGENT_MODEL,
+            scorer_model=SCORER_MODEL,
+            mcp_registry_links=req.target_agent.mcp_registry_links,
+        )
+    else:
+        target_adapter = MockScriptedTargetAdapter(script=req.target_agent.mock_script or [])
+
+    sandbox = SandboxWrapper(target_invoke_fn=target_adapter, tool_proxy=tool_proxy)
+
+    payload = {
+        "run_id": run_id,
+        "agent_card": agent_card,
+        "policies": req.policies,
+        "categories": categories,
+        "scenario_pack": req.scenario_pack,
+        "max_turns": req.max_turns,
+        "budget": req.budget.model_dump(),
+        "artifacts": artifacts,
+    }
+
+    report = await run_attack(sandbox=sandbox, payload=payload)
+    await store.finish_run(
+        run_id,
+        [
+            {
+                "agent": "attack_agent",
+                "mode": "defensive_red_team",
+                "report": report,
+            }
+        ],
+    )
+
+
 def _scorecard_to_dict(sc) -> dict[str, Any]:
     """Convert a Scorecard to a JSON-serialisable dict."""
     return {
@@ -495,6 +661,86 @@ async def create_run(req: RunRequest) -> RunCreated:
     asyncio.create_task(_run_evaluation(run_id, req))
 
     return RunCreated(run_id=run_id)
+
+
+@app.post("/attack/runs", response_model=RunCreated, status_code=202)
+async def create_attack_run(req: AttackRunRequest) -> RunCreated:
+    """Start a defensive attack/test campaign run."""
+
+    categories = _resolve_attack_categories(req.categories, req.scenario_pack)
+    bad = [cat for cat in categories if cat not in ATTACK_VALID_CATEGORIES]
+    if bad:
+        raise HTTPException(400, f"Unknown category(ies): {bad}. Valid: {sorted(ATTACK_VALID_CATEGORIES)}")
+
+    if req.max_turns < 1 or req.max_turns > 20:
+        raise HTTPException(400, "max_turns must be between 1 and 20")
+    if req.require_sandbox and req.target_agent.type == "http":
+        raise HTTPException(
+            400,
+            "Sandbox is required. Use target_agent.type='world_sandbox' or 'mock', "
+            "or set require_sandbox=false to allow direct HTTP target execution.",
+        )
+
+    run_id = str(uuid.uuid4())
+    config = {"mode": "attack", **req.model_dump()}
+    config["resolved_categories"] = categories
+    await store.create_run(run_id, config)
+
+    async def _runner() -> None:
+        try:
+            await _run_attack_campaign(run_id, req)
+            await store.append_event(run_id, {"type": "attack_complete"})
+        except Exception as exc:
+            await store.append_event(run_id, {"type": "attack_error", "error": str(exc)})
+            await store.finish_run(
+                run_id,
+                [
+                    {
+                        "agent": "attack_agent",
+                        "mode": "defensive_red_team",
+                        "error": str(exc),
+                    }
+                ],
+            )
+
+    asyncio.create_task(_runner())
+    return RunCreated(run_id=run_id)
+
+
+@app.post("/attack/scenarios/generate")
+async def generate_attack_scenarios(req: AttackScenarioRequest) -> dict[str, Any]:
+    """Generate contextualized defensive test scenarios from agent metadata."""
+    from safety_kit.attack import SafeTemplateGenerator
+
+    categories = _resolve_attack_categories(req.categories, req.scenario_pack)
+    bad = [cat for cat in categories if cat not in ATTACK_VALID_CATEGORIES]
+    if bad:
+        raise HTTPException(400, f"Unknown category(ies): {bad}. Valid: {sorted(ATTACK_VALID_CATEGORIES)}")
+    if req.max_turns < 1 or req.max_turns > 20:
+        raise HTTPException(400, "max_turns must be between 1 and 20")
+    if req.per_category < 1 or req.per_category > 10:
+        raise HTTPException(400, "per_category must be between 1 and 10")
+
+    artifacts = _default_attack_artifacts(req.inbox)
+    artifacts.update(req.artifacts)
+
+    generator = SafeTemplateGenerator()
+    scenarios = generator.synthesize_scenarios(
+        agent_card=req.agent_card.model_dump(),
+        policies=req.policies,
+        categories=categories,
+        max_turns=req.max_turns,
+        artifacts=artifacts,
+        tool_specs=req.agent_card.tool_specs,
+        per_category=req.per_category,
+        scenario_pack=req.scenario_pack,
+    )
+    return {
+        "count": len(scenarios),
+        "categories": categories,
+        "scenario_pack": req.scenario_pack,
+        "scenarios": scenarios,
+    }
 
 
 @app.get("/runs")
