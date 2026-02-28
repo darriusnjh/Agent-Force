@@ -90,13 +90,13 @@ This will:
 1. Run the agent (with mock tools) on each scenario.
 2. Score each run with the safety scorer (LLM-as-judge).
 3. Print a scorecard to the terminal (overall score, category breakdown, flags, recommendations).
-4. Save a full report to a JSON file (e.g., `email_agent_safety_report.json`).
+4. Save a full report JSON under `artifacts/reports/`.
 
 ---
 
 ## REST API
 
-The FastAPI server lets any frontend trigger evaluations and stream live results. Runs and scorecards are automatically persisted to a simple `runs.json` file.
+The FastAPI server lets any frontend trigger evaluations and stream live results. Runs and scorecards are persisted in `artifacts/runs.json`.
 
 Start the server:
 
@@ -459,7 +459,7 @@ Agent-Force/
 │
 └── api/                     # REST API
     ├── server.py            # FastAPI app — all endpoints
-    └── store.py             # simple JSON run persistence (runs.json)
+    └── store.py             # simple JSON run persistence (artifacts/runs.json)
 ```
 
 ---

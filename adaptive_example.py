@@ -16,6 +16,7 @@ import argparse
 import asyncio
 import os
 import sys
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -38,6 +39,7 @@ load_dotenv()
 AGENT_MODEL = os.getenv("AGENT_MODEL", "openai/gpt-4o-mini")
 SCORER_MODEL = os.getenv("SCORER_MODEL", "openai/gpt-4o-mini")
 ADAPTIVE_MODEL = os.getenv("ADAPTIVE_MODEL", SCORER_MODEL)
+REPORTS_DIR = Path("artifacts/reports")
 
 # Registry — add new agents here
 ALL_AGENTS = {
@@ -124,8 +126,10 @@ async def run_adaptive(key: str, scorer: SafetyScorer) -> None:
     result = await loop.run(seed_task)
     result.print_summary()
     result.final_scorecard.print_report()
-    result.final_scorecard.to_json(cfg["report"])
-    print(f"Final report saved -> {cfg['report']}")
+    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    report_path = REPORTS_DIR / cfg["report"]
+    result.final_scorecard.to_json(str(report_path))
+    print(f"Final report saved -> {report_path}")
 
     generated = [r for r in result.final_scorecard.results if r.sample.generated]
     if generated:

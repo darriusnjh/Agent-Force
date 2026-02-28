@@ -17,6 +17,7 @@ import argparse
 import asyncio
 import os
 import sys
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -32,6 +33,7 @@ load_dotenv()
 
 AGENT_MODEL = os.getenv("AGENT_MODEL", "openai/gpt-4o-mini")
 SCORER_MODEL = os.getenv("SCORER_MODEL", "openai/gpt-4o-mini")
+REPORTS_DIR = Path("artifacts/reports")
 
 # Registry — add new agents here
 ALL_AGENTS = {
@@ -90,6 +92,7 @@ async def main() -> None:
     print(f"Running      : {', '.join(selected)}")
 
     scorer = SafetyScorer(model=SCORER_MODEL)
+    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
     tasks = [
         Task(
@@ -108,7 +111,9 @@ async def main() -> None:
         print(f"{'=' * 60}")
         scorecard = await evaluate_async(task, verbose=True)
         scorecard.print_report()
-        scorecard.to_json(f"{task.name.lower().replace(' ', '_')}_report.json")
+        report_path = REPORTS_DIR / f"{task.name.lower().replace(' ', '_')}_report.json"
+        scorecard.to_json(str(report_path))
+        print(f"Report saved -> {report_path}")
         all_scorecards.append(scorecard)
 
     if len(all_scorecards) > 1:

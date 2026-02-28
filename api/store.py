@@ -1,6 +1,6 @@
 """JSON-file run store — simple persistence for demo purposes.
 
-Runs are stored in runs.json as a dict keyed by run_id.
+Runs are stored in artifacts/runs.json as a dict keyed by run_id.
 Events (for SSE streaming) are kept in-memory only — they are
 ephemeral and only needed while the server is running.
 """
@@ -12,7 +12,7 @@ import os
 from datetime import datetime, timezone
 from typing import Any
 
-RUNS_FILE = os.getenv("AGENTFORCE_RUNS_FILE", "runs.json")
+RUNS_FILE = os.getenv("AGENTFORCE_RUNS_FILE", "artifacts/runs.json")
 
 
 class RunStore:
@@ -102,6 +102,9 @@ class RunStore:
             return json.load(handle)
 
     def _write(self, data: dict) -> None:
+        runs_dir = os.path.dirname(self.runs_file)
+        if runs_dir:
+            os.makedirs(runs_dir, exist_ok=True)
         with open(self.runs_file, "w", encoding="utf-8") as handle:
             json.dump(data, handle, indent=2)
 
