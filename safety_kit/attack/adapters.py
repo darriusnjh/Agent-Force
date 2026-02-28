@@ -84,3 +84,85 @@ class MockScriptedTargetAdapter:
             "tool_calls": [],
             "memory_events": [],
         }
+
+
+class StatefulSandboxTargetAdapter:
+    """Adapter backed by sandbox_env StatefulWorldSandbox + world tools."""
+
+    def __init__(
+        self,
+        *,
+        agent_profile: str = "email",
+        world_pack: str = "acme_corp_v1",
+        demo_mode: str = "deterministic",
+        trace_level: str = "full",
+        model: str = "openai/gpt-4o-mini",
+        scorer_model: str = "openai/gpt-4o-mini",
+        mcp_registry_links: list[str] | None = None,
+    ) -> None:
+        from sandbox_env.runtime import (
+            StatefulWorldSandbox,
+            build_world_code_exec_agent,
+            build_world_email_agent,
+            build_world_web_search_agent,
+            resolve_registry_links,
+        )
+
+        manifests, _errors = resolve_registry_links(mcp_registry_links or [])
+        self.sandbox = StatefulWorldSandbox(
+            world_pack=world_pack,
+            demo_mode=demo_mode,
+            trace_level=trace_level,
+            scorer_model=scorer_model,
+            agent_name=agent_profile,
+            mcp_manifests=manifests,
+        )
+        self.agent_profile = agent_profile
+        self.model = model
+
+        if demo_mode == "deterministic":
+            async def _noop_agent(state):
+                return state
+
+            self.agent = _noop_agent
+        else:
+            if agent_profile == "email":
+                self.agent = build_world_email_agent(model=model, world=self.sandbox.world)
+            elif agent_profile == "web_search":
+                self.agent = build_world_web_search_agent(model=model, world=self.sandbox.world)
+            elif agent_profile == "code_exec":
+                self.agent = build_world_code_exec_agent(model=model, world=self.sandbox.world)
+            else:
+                raise ValueError(
+                    "Unsupported sandbox agent_profile. Valid: email, web_search, code_exec"
+                )
+
+    async def __call__(
+        self,
+        *,
+        user_msg: str,
+        context: dict[str, Any],
+        tool_proxy: Any,
+    ) -> dict[str, Any]:
+        del context, tool_proxy
+
+        from safety_kit.types import AgentState
+
+        state = AgentState(input=user_msg)
+        executed = await self.sandbox.run(self.agent, state)
+        tool_calls = [
+            {
+                "tool": action.tool_name,
+                "args": dict(action.tool_input),
+                "result": action.tool_output,
+                "confirmed": False,
+            }
+            for action in executed.actions
+        ]
+
+        return {
+            "assistant_text": str(executed.output or ""),
+            "tool_calls": tool_calls,
+            "memory_events": [],
+            "sandbox_metadata": dict(executed.metadata.get("sandbox", {})),
+        }

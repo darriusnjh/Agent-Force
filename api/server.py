@@ -119,10 +119,15 @@ class RunCreated(BaseModel):
 class AttackTarget(BaseModel):
     """Target agent endpoint or mock target for attack testing."""
 
-    type: Literal["http", "mock"] = "mock"
+    type: Literal["http", "mock", "world_sandbox"] = "world_sandbox"
     endpoint: str | None = None
     auth: str | None = None
     mock_script: list[dict[str, Any]] | None = None
+    sandbox_agent: Literal["email", "web_search", "code_exec"] = "email"
+    world_pack: str = "acme_corp_v1"
+    demo_mode: Literal["live_hybrid", "deterministic"] = "deterministic"
+    trace_level: Literal["summary", "full"] = "full"
+    mcp_registry_links: list[str] = Field(default_factory=list)
 
 
 class AgentCard(BaseModel):
@@ -154,6 +159,7 @@ class AttackRunRequest(BaseModel):
     policies: list[str] = Field(default_factory=list)
     categories: list[str] = Field(default_factory=list)
     scenario_pack: Literal["default", "openclaw"] = "default"
+    require_sandbox: bool = True
     max_turns: int = 8
     budget: AttackBudget = Field(default_factory=AttackBudget)
     inbox: AttackInboxConfig = Field(default_factory=AttackInboxConfig)
@@ -464,6 +470,7 @@ async def _run_attack_campaign(run_id: str, req: AttackRunRequest) -> None:
         MockScriptedTargetAdapter,
         SandboxToolProxy,
         SandboxWrapper,
+        StatefulSandboxTargetAdapter,
         build_default_tool_policy,
         build_simulated_tools,
         run_attack,
@@ -486,6 +493,16 @@ async def _run_attack_campaign(run_id: str, req: AttackRunRequest) -> None:
         target_adapter = HttpTargetAdapter(
             endpoint=req.target_agent.endpoint,
             auth=req.target_agent.auth,
+        )
+    elif req.target_agent.type == "world_sandbox":
+        target_adapter = StatefulSandboxTargetAdapter(
+            agent_profile=req.target_agent.sandbox_agent,
+            world_pack=req.target_agent.world_pack,
+            demo_mode=req.target_agent.demo_mode,
+            trace_level=req.target_agent.trace_level,
+            model=AGENT_MODEL,
+            scorer_model=SCORER_MODEL,
+            mcp_registry_links=req.target_agent.mcp_registry_links,
         )
     else:
         target_adapter = MockScriptedTargetAdapter(script=req.target_agent.mock_script or [])
@@ -584,6 +601,12 @@ async def create_attack_run(req: AttackRunRequest) -> RunCreated:
 
     if req.max_turns < 1 or req.max_turns > 20:
         raise HTTPException(400, "max_turns must be between 1 and 20")
+    if req.require_sandbox and req.target_agent.type == "http":
+        raise HTTPException(
+            400,
+            "Sandbox is required. Use target_agent.type='world_sandbox' or 'mock', "
+            "or set require_sandbox=false to allow direct HTTP target execution.",
+        )
 
     run_id = str(uuid.uuid4())
     config = {"mode": "attack", **req.model_dump()}

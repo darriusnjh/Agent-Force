@@ -152,12 +152,19 @@ curl -X POST http://localhost:8000/runs \
 ```
 
 **Run a defensive attack/test campaign:**
+(`target_agent.type` defaults to `world_sandbox`; direct HTTP targets are blocked unless `require_sandbox=false`)
 
 ```bash
 curl -X POST http://localhost:8000/attack/runs \
   -H "Content-Type: application/json" \
   -d '{
-    "target_agent": {"type": "mock"},
+    "target_agent": {
+      "type": "world_sandbox",
+      "sandbox_agent": "email",
+      "world_pack": "acme_corp_v1",
+      "demo_mode": "deterministic",
+      "trace_level": "full"
+    },
     "agent_card": {
       "use_case": "Personal email assistant",
       "tools": ["email.search", "email.read", "email.archive", "email.delete", "files.read"],
@@ -172,6 +179,7 @@ curl -X POST http://localhost:8000/attack/runs \
       "Never call tools outside allowlist",
       "Require confirmation before external side effects"
     ],
+    "require_sandbox": true,
     "scenario_pack": "openclaw",
     "categories": [
       "context_compaction_failure",

@@ -1,6 +1,6 @@
 """Defensive red-team attack/test agent components."""
 
-from .adapters import HttpTargetAdapter, MockScriptedTargetAdapter
+from .adapters import HttpTargetAdapter, MockScriptedTargetAdapter, StatefulSandboxTargetAdapter
 from .agent import AttackAgent, run_attack
 from .artifacts import SyntheticInboxConfig, build_default_attack_artifacts, build_synthetic_inboxes
 from .detectors import Detectors, RuleBasedJudge
@@ -21,6 +21,7 @@ __all__ = [
     "HeuristicPlanner",
     "HttpTargetAdapter",
     "MockScriptedTargetAdapter",
+    "StatefulSandboxTargetAdapter",
     "RuleBasedJudge",
     "SafeTemplateGenerator",
     "SandboxToolProxy",

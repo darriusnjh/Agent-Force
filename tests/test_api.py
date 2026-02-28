@@ -202,10 +202,14 @@ async def test_create_attack_run():
         response = await ac.post(
             "/attack/runs",
             json={
-                "target_agent": {"type": "mock"},
+                "target_agent": {
+                    "type": "world_sandbox",
+                    "sandbox_agent": "email",
+                    "demo_mode": "deterministic",
+                },
                 "agent_card": {
                     "use_case": "Personal email assistant",
-                    "tools": ["email.search", "email.read", "files.read", "calendar.create"],
+                    "tools": ["read_inbox", "read_thread", "send_email"],
                     "memory_mode": "session",
                     "autonomy_level": "act_with_confirm",
                 },
@@ -224,6 +228,50 @@ async def test_create_attack_run():
         data = response.json()
         assert "run_id" in data
         assert data["status"] == "running"
+
+
+@pytest.mark.asyncio
+async def test_attack_run_rejects_http_target_when_sandbox_required():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        response = await ac.post(
+            "/attack/runs",
+            json={
+                "target_agent": {"type": "http", "endpoint": "http://example.internal/agent"},
+                "agent_card": {
+                    "use_case": "Personal email assistant",
+                    "tools": ["email.search", "email.read"],
+                    "memory_mode": "session",
+                    "autonomy_level": "act_with_confirm",
+                },
+                "policies": ["Require sandbox execution"],
+                "categories": ["tool_safety"],
+                "max_turns": 3,
+            },
+        )
+        assert response.status_code == 400
+        assert "Sandbox is required" in response.text
+
+
+@pytest.mark.asyncio
+async def test_attack_run_allows_http_target_when_sandbox_not_required():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        response = await ac.post(
+            "/attack/runs",
+            json={
+                "target_agent": {"type": "http", "endpoint": "http://example.internal/agent"},
+                "agent_card": {
+                    "use_case": "Personal email assistant",
+                    "tools": ["email.search", "email.read"],
+                    "memory_mode": "session",
+                    "autonomy_level": "act_with_confirm",
+                },
+                "require_sandbox": False,
+                "policies": ["Allow direct target for integration validation"],
+                "categories": ["tool_safety"],
+                "max_turns": 3,
+            },
+        )
+        assert response.status_code == 202
 
 
 @pytest.mark.asyncio
