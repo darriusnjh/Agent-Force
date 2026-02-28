@@ -1,4 +1,5 @@
 # ── pages/2_evaluation.py ────────────────────────────────────────────────────
+import json
 import os
 import sys
 
@@ -50,6 +51,16 @@ ATTACK_CATEGORIES = [
 
 def _parse_csv_items(raw: str) -> list[str]:
     return [item.strip() for item in (raw or "").split(",") if item.strip()]
+
+
+def _parse_json_list(raw: str) -> list[dict]:
+    text = (raw or "").strip()
+    if not text:
+        return []
+    data = json.loads(text)
+    if not isinstance(data, list):
+        raise ValueError("Mock script must be a JSON array.")
+    return [item for item in data if isinstance(item, dict)]
 
 
 def _build_tool_specs(tools: list[str]) -> list[dict]:
@@ -277,6 +288,18 @@ with tab_standard:
             st.button("ABORT", use_container_width=True, key="std_abort")
 
         st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
+        std_mcp_links_raw = st.text_area(
+            "MCP Registry Links (optional)",
+            key="std_mcp_registry_links",
+            height=80,
+            help=(
+                "One http(s) registry URL per line. "
+                "Used by backend sandbox runtime for MCP manifest resolution."
+            ),
+        )
+        std_mcp_registry_links = [
+            line.strip() for line in (std_mcp_links_raw or "").splitlines() if line.strip()
+        ]
 
         if not run_clicked and not adaptive_run:
             _render_panel(f"SCENARIO QUEUE — {len(scenarios)} TESTS READY", "rgba(0,212,255,0.18)")
@@ -289,12 +312,13 @@ with tab_standard:
             if alive:
                 with st.status("Initializing Agent-Force Engine...", expanded=True) as status_box:
                     run_id = start_run(
-                        agents=[config.get("agent", "default")],
+                        agents=[config.get("agent", "email")],
                         adaptive=config.get("adaptive", False) or adaptive_run,
                         agent_model=config.get("agent_model"),
                         scorer_model=config.get("scorer_model"),
                         max_rounds=config.get("max_rounds", 3),
                         samples_per_round=config.get("samples_per_round", 4),
+                        mcp_registry_links=std_mcp_registry_links,
                     )
 
                     if run_id:
@@ -334,10 +358,10 @@ with tab_attack:
             border-radius:12px;padding:14px 22px;margin-bottom:16px;">
   <div style="font-family:'Space Mono',monospace;font-size:11px;color:{COLORS['warn']};
               letter-spacing:0.08em;text-transform:uppercase;">
-    Defensive Attack Kit (Sandbox Mode)
+    Defensive Attack Kit
   </div>
   <div style="font-size:12px;color:{COLORS['text_dim']};margin-top:6px;">
-    Configure target agent metadata, generate contextualized scenarios, and run sandbox campaigns with deterministic guardrail checks.
+    Configure target metadata, generate contextualized scenarios, and run campaigns against sandbox, custom HTTP, or mock scripted targets.
   </div>
 </div>
 """,
@@ -375,6 +399,11 @@ with tab_attack:
 - `Baseline Coverage`: broad checks across policy, memory, tool, and autonomy controls.
 - `Resilience Stress`: higher pressure on compaction, stop-channel, confirmation, and batching failure modes.
 
+**Target Source**
+- `Sandbox Agent`: built-in world profile (`email`, `web_search`, `code_exec`) with optional MCP registry links.
+- `Custom HTTP Agent`: your real agent endpoint for live plug-and-play testing.
+- `Mock Scripted Agent`: deterministic scripted responses for reproducible demos.
+
 **Execution Controls**
 - `Max Turns`: limits the depth of each scenario conversation.
 - `Max Tests`: caps number of scenarios executed in one campaign.
@@ -390,11 +419,12 @@ with tab_attack:
         "email": "email.search,email.read,email.archive,email.delete,files.read",
         "web_search": "web_search,browse_page,summarise_text",
         "code_exec": "run_python,list_files,read_file",
-        "custom": "files.read,email.read,email.archive,email.delete",
+        "jira": "jira.search_issues,jira.get_issue,jira.add_comment,jira.transition_issue",
+        "default": "files.read,email.read,email.archive,email.delete",
     }
     default_agent = config.get("agent", "email")
     if "attack_tools_input" not in st.session_state:
-        st.session_state["attack_tools_input"] = default_tools.get(default_agent, default_tools["custom"])
+        st.session_state["attack_tools_input"] = default_tools.get(default_agent, default_tools["default"])
     if "attack_use_case" not in st.session_state:
         st.session_state["attack_use_case"] = "Personal email assistant"
     if "attack_policies" not in st.session_state:
@@ -403,6 +433,14 @@ with tab_attack:
             "Never call tools outside allowlist\n"
             "Require confirmation before external side effects"
         )
+    if "attack_mcp_registry_links" not in st.session_state:
+        st.session_state["attack_mcp_registry_links"] = ""
+    if "attack_http_endpoint" not in st.session_state:
+        st.session_state["attack_http_endpoint"] = "http://127.0.0.1:9000/invoke"
+    if "attack_http_auth" not in st.session_state:
+        st.session_state["attack_http_auth"] = ""
+    if "attack_mock_script" not in st.session_state:
+        st.session_state["attack_mock_script"] = "[]"
 
     c1, c2 = st.columns([1.4, 1])
     with c1:
@@ -437,6 +475,15 @@ with tab_attack:
         )
 
     with c2:
+        target_mode = st.selectbox(
+            "Target Agent Source",
+            ["Sandbox Agent", "Custom HTTP Agent", "Mock Scripted Agent"],
+            help=(
+                "Sandbox Agent: built-in profile in world sandbox. "
+                "Custom HTTP Agent: your running endpoint. "
+                "Mock Scripted Agent: deterministic scripted target."
+            ),
+        )
         scenario_pack_label = st.selectbox(
             "Scenario Family",
             ["Baseline Coverage", "Resilience Stress"],
@@ -446,11 +493,70 @@ with tab_attack:
         scenario_pack = (
             "resilience_stress" if scenario_pack_label == "Resilience Stress" else "baseline_coverage"
         )
-        sandbox_agent = st.selectbox(
-            "Sandbox Agent Profile",
-            ["email", "web_search", "code_exec"],
-            help="Select the synthetic target behavior profile used by sandbox tooling and traces.",
-        )
+        sandbox_agent = "email"
+        target_world_pack = "acme_corp_v1"
+        target_demo_mode = "deterministic"
+        target_trace_level = "full"
+        target_endpoint = ""
+        target_auth = ""
+        target_mock_script = []
+        require_sandbox = True
+
+        if target_mode == "Sandbox Agent":
+            sandbox_agent = st.selectbox(
+                "Sandbox Agent Profile",
+                ["email", "web_search", "code_exec"],
+                help="Select the synthetic target behavior profile used by sandbox tooling and traces.",
+            )
+            target_world_pack = st.text_input(
+                "World Pack",
+                value="acme_corp_v1",
+                help="Sandbox world profile used for synthetic environment state.",
+            )
+            target_demo_mode = st.selectbox(
+                "Sandbox Demo Mode",
+                ["deterministic", "live_hybrid"],
+                help="Deterministic mode is stable for demos; live_hybrid uses live-model behavior.",
+            )
+            target_trace_level = st.selectbox(
+                "Trace Level",
+                ["full", "summary"],
+                help="Controls sandbox trace artifact detail level.",
+            )
+            st.text_area(
+                "MCP Registry Links (one URL per line)",
+                key="attack_mcp_registry_links",
+                height=80,
+                help="Optional MCP registry URLs for sandbox-side manifest resolution.",
+            )
+        elif target_mode == "Custom HTTP Agent":
+            target_endpoint = st.text_input(
+                "Target HTTP Endpoint",
+                key="attack_http_endpoint",
+                help="Your target agent endpoint. Payload shape: {user_msg, context}.",
+            )
+            target_auth = st.text_input(
+                "Authorization Header (optional)",
+                key="attack_http_auth",
+                help="Value passed as Authorization header, e.g. Bearer <token>.",
+            )
+            require_sandbox = st.toggle(
+                "Require Sandbox",
+                value=False,
+                help="Must be OFF for direct HTTP target execution.",
+            )
+        else:
+            mock_script_raw = st.text_area(
+                "Mock Script (JSON array)",
+                key="attack_mock_script",
+                height=100,
+                help="Optional scripted sequence for deterministic mock-target testing.",
+            )
+            try:
+                target_mock_script = _parse_json_list(mock_script_raw)
+            except Exception as exc:
+                st.error(f"Mock script JSON error: {exc}")
+
         autonomy_level = st.selectbox(
             "Autonomy Level",
             ["suggest", "act_with_confirm", "act"],
@@ -498,6 +604,11 @@ with tab_attack:
     tools = _parse_csv_items(tools_input)
     policies = [line.strip() for line in policy_input.splitlines() if line.strip()]
     tool_specs = _build_tool_specs(tools)
+    mcp_registry_links = [
+        line.strip()
+        for line in (st.session_state.get("attack_mcp_registry_links", "") or "").splitlines()
+        if line.strip()
+    ]
 
     agent_card = {
         "use_case": use_case or "General assistant",
@@ -560,19 +671,36 @@ with tab_attack:
     if run_attack_clicked:
         with st.status("Running sandbox attack campaign...", expanded=True) as status_box:
             try:
-                run_id = start_attack_run(
-                    target_agent={
+                if target_mode == "Sandbox Agent":
+                    target_agent_payload = {
                         "type": "world_sandbox",
                         "sandbox_agent": sandbox_agent,
-                        "world_pack": "acme_corp_v1",
-                        "demo_mode": "deterministic",
-                        "trace_level": "full",
-                    },
+                        "world_pack": target_world_pack or "acme_corp_v1",
+                        "demo_mode": target_demo_mode,
+                        "trace_level": target_trace_level,
+                        "mcp_registry_links": mcp_registry_links,
+                    }
+                elif target_mode == "Custom HTTP Agent":
+                    if not target_endpoint.strip():
+                        raise ValueError("Target HTTP Endpoint is required for Custom HTTP Agent mode.")
+                    target_agent_payload = {
+                        "type": "http",
+                        "endpoint": target_endpoint.strip(),
+                        "auth": target_auth.strip() or None,
+                    }
+                else:
+                    target_agent_payload = {
+                        "type": "mock",
+                        "mock_script": target_mock_script,
+                    }
+
+                run_id = start_attack_run(
+                    target_agent=target_agent_payload,
                     agent_card=agent_card,
                     policies=policies,
                     categories=selected_categories,
                     scenario_pack=scenario_pack,
-                    require_sandbox=True,
+                    require_sandbox=require_sandbox,
                     max_turns=max_turns,
                     max_tests=max_tests,
                     inbox={"toy_count": 10, "realistic_count": 5000, "canary_count": 5},

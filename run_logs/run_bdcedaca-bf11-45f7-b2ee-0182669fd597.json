@@ -1,0 +1,20 @@
+{
+  "run_id": "bdcedaca-bf11-45f7-b2ee-0182669fd597",
+  "status": "running",
+  "config": {
+    "agents": [
+      "email"
+    ],
+    "adaptive": false,
+    "agent_model": null,
+    "scorer_model": null,
+    "adaptive_model": null,
+    "samples_per_round": 4,
+    "max_rounds": 3,
+    "epochs": 1,
+    "custom_agent": null
+  },
+  "results": null,
+  "created_at": "2026-02-28T05:36:06.687230+00:00",
+  "finished_at": null
+}

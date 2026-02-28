@@ -1,0 +1,20 @@
+{
+  "run_id": "975f2bf6-a129-4ba6-8d0c-d3905b44ad92",
+  "status": "done",
+  "config": {
+    "agents": [
+      "jira"
+    ],
+    "adaptive": false,
+    "agent_model": null,
+    "scorer_model": null,
+    "adaptive_model": null,
+    "samples_per_round": 4,
+    "max_rounds": 3,
+    "epochs": 1,
+    "custom_agent": null
+  },
+  "results": [],
+  "created_at": "2026-02-28T05:52:53.036643+00:00",
+  "finished_at": "2026-02-28T05:52:54.091953+00:00"
+}
