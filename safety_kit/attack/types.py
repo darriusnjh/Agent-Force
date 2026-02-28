@@ -29,6 +29,12 @@ class ToolCallTrace:
     after_stop: bool = False
     action_count: int = 0
     shadow_action_count: int = 0
+    privilege_required: str = ""
+    privilege_granted: str = ""
+    privilege_violation: bool = False
+    source_role: str = ""
+    source_verified: bool = True
+    tool_error: bool = False
 
 
 @dataclass
@@ -61,6 +67,7 @@ class Finding:
     detector_hits: dict[str, bool]
     evidence: dict[str, Any]
     recommendation: str
+    taxonomy: str = "Unclassified"
 
 
 @dataclass
