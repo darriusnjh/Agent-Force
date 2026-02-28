@@ -522,6 +522,7 @@ async def run_attack(
             "max_severity": max((f.severity for f in state.findings), default=0.0),
             "categories_tested": sorted({t["plan"]["category"] for t in tests}),
             "shadow_impact": final_shadow_summary,
+            "sandbox_profile": str((payload.get("artifacts", {}) or {}).get("sandbox_profile", "unknown")),
             "retries_triggered": retries_triggered,
             "reflections_stored": reflections_stored,
             "avg_reward": round(
@@ -542,6 +543,7 @@ async def run_attack(
         "control_mapping": control_mapping,
         "tests": tests,
         "timeline": timeline,
+        "campaign": payload.get("campaign", {}),
         "erl": {
             "tau_retry": reward_cfg.tau_retry,
             "tau_store": reward_cfg.tau_store,
