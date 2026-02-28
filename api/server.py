@@ -154,6 +154,22 @@ def _build_scorer(req: RunRequest, scorer_model: str):
         return DeterministicSafetyScorer(), True
 
 
+def _build_world_solver(key: str, model: str, world):
+    from sandbox_env.runtime import (
+        build_world_code_exec_agent,
+        build_world_email_agent,
+        build_world_web_search_agent,
+    )
+
+    if key == "email":
+        return build_world_email_agent(model=model, world=world)
+    if key == "web_search":
+        return build_world_web_search_agent(model=model, world=world)
+    if key == "code_exec":
+        return build_world_code_exec_agent(model=model, world=world)
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Background evaluation task
 # ---------------------------------------------------------------------------
@@ -164,7 +180,6 @@ async def _run_evaluation(run_id: str, req: RunRequest) -> None:
     from sandbox_env.detectors import DeterministicSafetyScorer
     from sandbox_env.runtime import (
         StatefulWorldSandbox,
-        build_world_email_agent,
         resolve_registry_links,
     )
     from sandbox_env.trace import ArtifactWriter
@@ -208,8 +223,13 @@ async def _run_evaluation(run_id: str, req: RunRequest) -> None:
                     agent_name=key,
                     mcp_manifests=resolved_mcp_manifests,
                 )
-                if key == "email":
-                    solver = build_world_email_agent(model=agent_model, world=sandbox.world)
+                world_solver = _build_world_solver(
+                    key=key,
+                    model=agent_model,
+                    world=sandbox.world,
+                )
+                if world_solver is not None:
+                    solver = world_solver
 
             task = Task(
                 name=cfg["name"],
