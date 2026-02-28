@@ -23,6 +23,7 @@ class StatefulWorldSandbox:
         demo_mode: str = "live_hybrid",
         trace_level: str = "full",
         scorer_model: str = "openai/gpt-4o-mini",
+        scorer_api_key: str | None = None,
         timeout_seconds: float = 45.0,
         agent_name: str = "unknown",
         mcp_manifests: list[dict] | None = None,
@@ -38,6 +39,7 @@ class StatefulWorldSandbox:
         self.detector = RuleViolationDetector()
         self.confirmer = LLMViolationConfirmer(
             model=scorer_model,
+            api_key=scorer_api_key,
             deterministic_mode=(demo_mode == "deterministic"),
         )
 

@@ -1,7 +1,7 @@
 # ── api_client.py ─────────────────────────────────────────────────────────────
 import json
 import requests
-from typing import Generator
+from typing import Dict, Generator, List, Optional, Union
 from config import API_BASE_URL
 from safety_kit.governance import build_standard_result_control_relevance
 
@@ -44,19 +44,28 @@ def start_run(
     return response.json()["run_id"]
 
 
+def _attack_headers(openai_api_key: Optional[str]) -> dict[str, str]:
+    headers: dict[str, str] = {}
+    key = (openai_api_key or "").strip()
+    if key:
+        headers["X-OpenAI-API-Key"] = key
+    return headers
+
+
 def start_attack_run(
     *,
-    target_agent: dict | None = None,
+    target_agent: Optional[dict] = None,
     agent_card: dict,
-    policies: list[str],
-    categories: list[str] | None = None,
-    scenario_pack: str = "default",
+    policies: List[str],
+    categories: Optional[List[str]] = None,
+    scenario_pack: str = "baseline_coverage",
     require_sandbox: bool = True,
     max_turns: int = 8,
     max_tests: int = 10,
-    inbox: dict | None = None,
-    erl: dict | None = None,
-    artifacts: dict | None = None,
+    inbox: Optional[dict] = None,
+    erl: Optional[dict] = None,
+    artifacts: Optional[dict] = None,
+    openai_api_key: Optional[str] = None,
 ) -> str:
     if target_agent is None:
         target_agent = {
@@ -84,7 +93,11 @@ def start_attack_run(
     if artifacts:
         payload["artifacts"] = artifacts
 
-    response = requests.post(f"{API_BASE_URL}/attack/runs", json=payload)
+    response = requests.post(
+        f"{API_BASE_URL}/attack/runs",
+        json=payload,
+        headers=_attack_headers(openai_api_key),
+    )
     response.raise_for_status()
     return response.json()["run_id"]
 
@@ -92,13 +105,14 @@ def start_attack_run(
 def generate_attack_scenarios(
     *,
     agent_card: dict,
-    policies: list[str],
-    categories: list[str] | None = None,
-    scenario_pack: str = "default",
+    policies: List[str],
+    categories: Optional[List[str]] = None,
+    scenario_pack: str = "baseline_coverage",
     max_turns: int = 8,
     per_category: int = 2,
-    inbox: dict | None = None,
-    artifacts: dict | None = None,
+    inbox: Optional[dict] = None,
+    artifacts: Optional[dict] = None,
+    openai_api_key: Optional[str] = None,
 ) -> list[dict]:
     payload = {
         "agent_card": agent_card,
@@ -113,7 +127,11 @@ def generate_attack_scenarios(
     if artifacts:
         payload["artifacts"] = artifacts
 
-    response = requests.post(f"{API_BASE_URL}/attack/scenarios/generate", json=payload)
+    response = requests.post(
+        f"{API_BASE_URL}/attack/scenarios/generate",
+        json=payload,
+        headers=_attack_headers(openai_api_key),
+    )
     response.raise_for_status()
     return response.json().get("scenarios", [])
 
@@ -160,7 +178,7 @@ def get_run_data(run_id: str = None):
     return _get_run_data(run_id)
 
 
-def get_attack_report(run_id: str = None) -> dict | None:
+def get_attack_report(run_id: Optional[str] = None) -> Optional[dict]:
     """Return attack report payload when the run is an attack campaign."""
     run_data = _get_run_data(run_id)
     if not run_data:
@@ -178,9 +196,9 @@ def _decorate_result_with_control_relevance(
     category: str,
     explanation: str,
     level: str,
-    score: float | int,
-    flags: list[str] | None = None,
-    recommendations: list[str] | None = None,
+    score: Union[float, int],
+    flags: Optional[List[str]] = None,
+    recommendations: Optional[List[str]] = None,
     input_text: str = "",
 ) -> dict:
     payload = {

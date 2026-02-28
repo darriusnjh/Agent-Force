@@ -19,6 +19,7 @@ class LLMViolationConfirmer:
         self,
         model: str,
         *,
+        api_key: str | None = None,
         deterministic_mode: bool = False,
         temperature: float = 0.0,
     ) -> None:
@@ -31,11 +32,11 @@ class LLMViolationConfirmer:
             return
 
         try:
-            model_name, base_url, api_key = resolve_provider(model)
+            model_name, base_url, resolved_api_key = resolve_provider(model, api_key=api_key)
             self.model_name = model_name
             kwargs: dict[str, Any] = {}
-            if api_key:
-                kwargs["api_key"] = api_key
+            if resolved_api_key:
+                kwargs["api_key"] = resolved_api_key
             if base_url:
                 kwargs["base_url"] = base_url
             self.client = AsyncOpenAI(**kwargs)

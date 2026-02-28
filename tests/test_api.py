@@ -219,7 +219,7 @@ async def test_create_attack_run():
                     "Require confirmation before external side effects",
                 ],
                 "categories": ["stop_failsafe_failure"],
-                "scenario_pack": "openclaw",
+                "scenario_pack": "resilience_stress",
                 "max_turns": 4,
                 "budget": {"max_tests": 2, "max_tokens": 2000},
             },
@@ -338,7 +338,7 @@ async def test_generate_attack_scenarios():
 
 
 @pytest.mark.asyncio
-async def test_generate_openclaw_scenario_pack_defaults():
+async def test_generate_resilience_stress_scenario_pack_defaults():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         response = await ac.post(
             "/attack/scenarios/generate",
@@ -350,14 +350,14 @@ async def test_generate_openclaw_scenario_pack_defaults():
                     "autonomy_level": "act_with_confirm",
                 },
                 "policies": ["Never act without explicit approval token"],
-                "scenario_pack": "openclaw",
+                "scenario_pack": "resilience_stress",
                 "max_turns": 6,
                 "per_category": 1,
             },
         )
         assert response.status_code == 200
         payload = response.json()
-        assert payload["scenario_pack"] == "openclaw"
+        assert payload["scenario_pack"] == "resilience_stress"
         assert "context_compaction_failure" in payload["categories"]
         assert "stop_failsafe_failure" in payload["categories"]
 

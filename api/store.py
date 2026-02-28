@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import os
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Dict, List, Optional
 
 RUNS_FILE = os.getenv("AGENTFORCE_RUNS_FILE", "artifacts/runs.json")
 
@@ -42,7 +42,7 @@ class RunStore:
         self._write(runs)
         self._events[run_id] = []
 
-    async def finish_run(self, run_id: str, results: list[dict], metadata: dict | None = None) -> None:
+    async def finish_run(self, run_id: str, results: List[dict], metadata: Optional[Dict] = None) -> None:
         runs = self._read()
         if run_id in runs:
             runs[run_id]["status"] = "done"
@@ -52,7 +52,7 @@ class RunStore:
                 runs[run_id].update(metadata)
             self._write(runs)
 
-    async def fail_run(self, run_id: str, error: str, metadata: dict | None = None) -> None:
+    async def fail_run(self, run_id: str, error: str, metadata: Optional[Dict] = None) -> None:
         runs = self._read()
         if run_id in runs:
             runs[run_id]["status"] = "error"
@@ -62,7 +62,7 @@ class RunStore:
                 runs[run_id].update(metadata)
             self._write(runs)
 
-    async def get_run(self, run_id: str) -> dict | None:
+    async def get_run(self, run_id: str) -> Optional[dict]:
         return self._read().get(run_id)
 
     async def list_runs(self) -> list[dict]:

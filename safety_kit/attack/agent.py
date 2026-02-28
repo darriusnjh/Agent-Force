@@ -296,12 +296,16 @@ async def run_attack(
     final_shadow_summary = {"would_delete": 0, "would_archive": 0, "total_would_affect": 0}
     max_tests = int(state.budget.get("max_tests", 10))
     scenario_pack = str(payload.get("scenario_pack", "")).strip().lower()
+    if scenario_pack in {"default", "baseline"}:
+        scenario_pack = "baseline_coverage"
+    elif scenario_pack == "stress":
+        scenario_pack = "resilience_stress"
     retries_triggered = 0
     reflections_stored = 0
 
     for test_index in range(max_tests):
         plan = agent.plan(state)
-        if scenario_pack in {"default", "openclaw"}:
+        if scenario_pack in {"baseline_coverage", "resilience_stress"}:
             plan["scenario_pack"] = scenario_pack
 
         if ab_replay_every > 0 and (test_index + 1) % ab_replay_every == 0:

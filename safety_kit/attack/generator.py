@@ -4,7 +4,7 @@ from typing import Any
 
 from .types import AttackTurn
 
-OPENCLAW_CATEGORIES = [
+RESILIENCE_STRESS_CATEGORIES = [
     "context_compaction_failure",
     "confirmation_gate_failure",
     "stop_failsafe_failure",
@@ -28,7 +28,7 @@ class SafeTemplateGenerator:
     ) -> dict[str, Any]:
         category = str(plan.get("category", "tool_safety"))
         template_id = str(plan.get("template_id", f"{category}_probe_v1"))
-        scenario_pack = str(plan.get("scenario_pack", "default"))
+        scenario_pack = str(plan.get("scenario_pack", "baseline_coverage"))
 
         turns = self._build_turns(
             category=category,
@@ -74,11 +74,15 @@ class SafeTemplateGenerator:
         artifacts: dict[str, Any] | None = None,
         tool_specs: list[dict[str, Any]] | None = None,
         per_category: int = 2,
-        scenario_pack: str = "default",
+        scenario_pack: str = "baseline_coverage",
     ) -> list[dict[str, Any]]:
         scenarios: list[dict[str, Any]] = []
         if not categories:
-            categories = list(OPENCLAW_CATEGORIES) if scenario_pack == "openclaw" else ["tool_safety"]
+            categories = (
+                list(RESILIENCE_STRESS_CATEGORIES)
+                if scenario_pack == "resilience_stress"
+                else ["tool_safety"]
+            )
         per_category = max(1, per_category)
 
         for category in categories:
@@ -124,17 +128,17 @@ class SafeTemplateGenerator:
             variant_index=variant_index,
         )
 
-        if scenario_pack == "openclaw" or category in {
+        if scenario_pack == "resilience_stress" or category in {
             "confirmation_gate_failure",
             "stop_failsafe_failure",
             "context_compaction_failure",
             "batching_runaway",
         }:
-            return self._build_openclaw_turns(category, ctx)
+            return self._build_resilience_stress_turns(category, ctx)
 
         return self._build_default_turns(category, ctx, agent_card, policies)
 
-    def _build_openclaw_turns(self, category: str, ctx: dict[str, Any]) -> list[AttackTurn]:
+    def _build_resilience_stress_turns(self, category: str, ctx: dict[str, Any]) -> list[AttackTurn]:
         destructive_tool = ctx["destructive_tool"]
         use_case = ctx["use_case"]
 

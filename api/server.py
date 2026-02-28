@@ -17,10 +17,10 @@ import json
 import os
 import uuid
 from contextlib import asynccontextmanager
-from typing import Any, AsyncGenerator, Literal
+from typing import Any, AsyncGenerator, Dict, List, Literal, Optional
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -33,7 +33,7 @@ AGENT_MODEL = os.getenv("AGENT_MODEL", "openai/gpt-4o-mini")
 SCORER_MODEL = os.getenv("SCORER_MODEL", "openai/gpt-4o-mini")
 ADAPTIVE_MODEL = os.getenv("ADAPTIVE_MODEL", SCORER_MODEL)
 
-ATTACK_DEFAULT_CATEGORIES = [
+ATTACK_BASELINE_CATEGORIES = [
     "data_boundary",
     "tool_safety",
     "memory_integrity",
@@ -46,7 +46,7 @@ ATTACK_DEFAULT_CATEGORIES = [
     "autonomy_escalation_boundary",
     "safety_decay_pressure",
 ]
-ATTACK_OPENCLAW_CATEGORIES = [
+ATTACK_RESILIENCE_STRESS_CATEGORIES = [
     "context_compaction_failure",
     "confirmation_gate_failure",
     "stop_failsafe_failure",
@@ -54,7 +54,13 @@ ATTACK_OPENCLAW_CATEGORIES = [
     "oversight_failure",
     "safety_decay_pressure",
 ]
-ATTACK_VALID_CATEGORIES = set(ATTACK_DEFAULT_CATEGORIES + ATTACK_OPENCLAW_CATEGORIES)
+ATTACK_VALID_CATEGORIES = set(ATTACK_BASELINE_CATEGORIES + ATTACK_RESILIENCE_STRESS_CATEGORIES)
+ATTACK_VALID_SCENARIO_PACKS = {"baseline_coverage", "resilience_stress"}
+ATTACK_SCENARIO_PACK_ALIASES = {
+    "default": "baseline_coverage",
+    "baseline": "baseline_coverage",
+    "stress": "resilience_stress",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -103,13 +109,13 @@ class RunRequest(BaseModel):
     adaptive: bool = False
     """Whether to use the AdaptiveEvalLoop (multi-round generation)."""
 
-    agent_model: str | None = None
+    agent_model: Optional[str] = None
     """Override AGENT_MODEL env var for this run."""
 
-    scorer_model: str | None = None
+    scorer_model: Optional[str] = None
     """Override SCORER_MODEL env var for this run."""
 
-    adaptive_model: str | None = None
+    adaptive_model: Optional[str] = None
     """Override ADAPTIVE_MODEL env var for this run (adaptive=True only)."""
 
     samples_per_round: int = 4
@@ -134,9 +140,9 @@ class AttackTarget(BaseModel):
     """Target agent endpoint or mock target for attack testing."""
 
     type: Literal["http", "mock", "world_sandbox"] = "world_sandbox"
-    endpoint: str | None = None
-    auth: str | None = None
-    mock_script: list[dict[str, Any]] | None = None
+    endpoint: Optional[str] = None
+    auth: Optional[str] = None
+    mock_script: Optional[List[Dict[str, Any]]] = None
     sandbox_agent: Literal["email", "web_search", "code_exec"] = "email"
     world_pack: str = "acme_corp_v1"
     demo_mode: Literal["live_hybrid", "deterministic"] = "deterministic"
@@ -190,7 +196,7 @@ class AttackRunRequest(BaseModel):
     agent_card: AgentCard
     policies: list[str] = Field(default_factory=list)
     categories: list[str] = Field(default_factory=list)
-    scenario_pack: Literal["default", "openclaw"] = "default"
+    scenario_pack: str = "baseline_coverage"
     require_sandbox: bool = True
     max_turns: int = 8
     budget: AttackBudget = Field(default_factory=AttackBudget)
@@ -205,7 +211,7 @@ class AttackScenarioRequest(BaseModel):
     agent_card: AgentCard
     policies: list[str] = Field(default_factory=list)
     categories: list[str] = Field(default_factory=list)
-    scenario_pack: Literal["default", "openclaw"] = "default"
+    scenario_pack: str = "baseline_coverage"
     max_turns: int = 8
     per_category: int = 2
     inbox: AttackInboxConfig = Field(default_factory=AttackInboxConfig)
@@ -292,7 +298,7 @@ async def _run_evaluation(run_id: str, req: RunRequest) -> None:
     from sandbox_env.trace import ArtifactWriter
     from safety_kit import Task, evaluate_async
 
-    artifact_writer: ArtifactWriter | None = None
+    artifact_writer: Optional[ArtifactWriter] = None
 
     try:
         agent_model = req.agent_model or AGENT_MODEL
@@ -474,7 +480,7 @@ async def _run_evaluation(run_id: str, req: RunRequest) -> None:
         await store.fail_run(run_id, str(exc), metadata=metadata)
 
 
-def _default_attack_artifacts(inbox_cfg: AttackInboxConfig | None = None) -> dict[str, Any]:
+def _default_attack_artifacts(inbox_cfg: Optional[AttackInboxConfig] = None) -> Dict[str, Any]:
     """Synthetic artifacts exposed to the attack sandbox."""
     from safety_kit.attack import SyntheticInboxConfig, build_default_attack_artifacts
 
@@ -488,15 +494,28 @@ def _default_attack_artifacts(inbox_cfg: AttackInboxConfig | None = None) -> dic
     return build_default_attack_artifacts(cfg)
 
 
+def _normalize_attack_scenario_pack(scenario_pack: str) -> str:
+    raw = str(scenario_pack or "").strip().lower()
+    if raw in ATTACK_VALID_SCENARIO_PACKS:
+        return raw
+    if raw in ATTACK_SCENARIO_PACK_ALIASES:
+        return ATTACK_SCENARIO_PACK_ALIASES[raw]
+    return ""
+
+
 def _resolve_attack_categories(categories: list[str], scenario_pack: str) -> list[str]:
     if categories:
         return categories
-    if scenario_pack == "openclaw":
-        return list(ATTACK_OPENCLAW_CATEGORIES)
-    return list(ATTACK_DEFAULT_CATEGORIES)
+    if scenario_pack == "resilience_stress":
+        return list(ATTACK_RESILIENCE_STRESS_CATEGORIES)
+    return list(ATTACK_BASELINE_CATEGORIES)
 
 
-async def _run_attack_campaign(run_id: str, req: AttackRunRequest) -> None:
+async def _run_attack_campaign(
+    run_id: str,
+    req: AttackRunRequest,
+    openai_api_key: Optional[str] = None,
+) -> None:
     """Execute defensive attack/test loop and persist findings."""
     from safety_kit.attack import (
         HttpTargetAdapter,
@@ -510,7 +529,8 @@ async def _run_attack_campaign(run_id: str, req: AttackRunRequest) -> None:
     )
 
     agent_card = req.agent_card.model_dump()
-    categories = _resolve_attack_categories(req.categories, req.scenario_pack)
+    scenario_pack = _normalize_attack_scenario_pack(req.scenario_pack)
+    categories = _resolve_attack_categories(req.categories, scenario_pack)
     policy = build_default_tool_policy(agent_card)
     artifacts = _default_attack_artifacts(req.inbox)
     artifacts.update(req.artifacts)
@@ -535,6 +555,7 @@ async def _run_attack_campaign(run_id: str, req: AttackRunRequest) -> None:
             trace_level=req.target_agent.trace_level,
             model=AGENT_MODEL,
             scorer_model=SCORER_MODEL,
+            api_key=openai_api_key,
             mcp_registry_links=req.target_agent.mcp_registry_links,
         )
     else:
@@ -547,7 +568,7 @@ async def _run_attack_campaign(run_id: str, req: AttackRunRequest) -> None:
         "agent_card": agent_card,
         "policies": req.policies,
         "categories": categories,
-        "scenario_pack": req.scenario_pack,
+        "scenario_pack": scenario_pack,
         "max_turns": req.max_turns,
         "budget": req.budget.model_dump(),
         "erl": req.erl.model_dump(exclude={"reflection_memory"}),
@@ -626,10 +647,20 @@ async def create_run(req: RunRequest) -> RunCreated:
 
 
 @app.post("/attack/runs", response_model=RunCreated, status_code=202)
-async def create_attack_run(req: AttackRunRequest) -> RunCreated:
+async def create_attack_run(
+    req: AttackRunRequest,
+    openai_api_key: Optional[str] = Header(default=None, alias="X-OpenAI-API-Key"),
+) -> RunCreated:
     """Start a defensive attack/test campaign run."""
 
-    categories = _resolve_attack_categories(req.categories, req.scenario_pack)
+    scenario_pack = _normalize_attack_scenario_pack(req.scenario_pack)
+    if not scenario_pack:
+        raise HTTPException(
+            400,
+            "Unknown scenario_pack. Valid values: baseline_coverage, resilience_stress",
+        )
+
+    categories = _resolve_attack_categories(req.categories, scenario_pack)
     bad = [cat for cat in categories if cat not in ATTACK_VALID_CATEGORIES]
     if bad:
         raise HTTPException(400, f"Unknown category(ies): {bad}. Valid: {sorted(ATTACK_VALID_CATEGORIES)}")
@@ -653,12 +684,17 @@ async def create_attack_run(req: AttackRunRequest) -> RunCreated:
 
     run_id = str(uuid.uuid4())
     config = {"mode": "attack", **req.model_dump()}
+    config["scenario_pack"] = scenario_pack
     config["resolved_categories"] = categories
     await store.create_run(run_id, config)
 
     async def _runner() -> None:
         try:
-            await _run_attack_campaign(run_id, req)
+            await _run_attack_campaign(
+                run_id,
+                req,
+                openai_api_key=(openai_api_key or "").strip() or None,
+            )
             await store.append_event(run_id, {"type": "attack_complete"})
         except Exception as exc:
             await store.append_event(run_id, {"type": "attack_error", "error": str(exc)})
@@ -678,11 +714,22 @@ async def create_attack_run(req: AttackRunRequest) -> RunCreated:
 
 
 @app.post("/attack/scenarios/generate")
-async def generate_attack_scenarios(req: AttackScenarioRequest) -> dict[str, Any]:
+async def generate_attack_scenarios(
+    req: AttackScenarioRequest,
+    openai_api_key: Optional[str] = Header(default=None, alias="X-OpenAI-API-Key"),
+) -> dict[str, Any]:
     """Generate contextualized defensive test scenarios from agent metadata."""
     from safety_kit.attack import SafeTemplateGenerator
+    del openai_api_key
 
-    categories = _resolve_attack_categories(req.categories, req.scenario_pack)
+    scenario_pack = _normalize_attack_scenario_pack(req.scenario_pack)
+    if not scenario_pack:
+        raise HTTPException(
+            400,
+            "Unknown scenario_pack. Valid values: baseline_coverage, resilience_stress",
+        )
+
+    categories = _resolve_attack_categories(req.categories, scenario_pack)
     bad = [cat for cat in categories if cat not in ATTACK_VALID_CATEGORIES]
     if bad:
         raise HTTPException(400, f"Unknown category(ies): {bad}. Valid: {sorted(ATTACK_VALID_CATEGORIES)}")
@@ -703,12 +750,12 @@ async def generate_attack_scenarios(req: AttackScenarioRequest) -> dict[str, Any
         artifacts=artifacts,
         tool_specs=req.agent_card.tool_specs,
         per_category=req.per_category,
-        scenario_pack=req.scenario_pack,
+        scenario_pack=scenario_pack,
     )
     return {
         "count": len(scenarios),
         "categories": categories,
-        "scenario_pack": req.scenario_pack,
+        "scenario_pack": scenario_pack,
         "scenarios": scenarios,
     }
 
