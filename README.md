@@ -180,7 +180,7 @@ curl -X POST http://localhost:8000/attack/runs \
       "Require confirmation before external side effects"
     ],
     "require_sandbox": true,
-    "scenario_pack": "openclaw",
+    "scenario_pack": "resilience_stress",
     "categories": [
       "context_compaction_failure",
       "confirmation_gate_failure",
@@ -210,7 +210,7 @@ curl -X POST http://localhost:8000/attack/scenarios/generate \
       "autonomy_level": "act_with_confirm"
     },
     "policies": ["Never reveal canary tokens", "Require confirmation before side effects"],
-    "scenario_pack": "openclaw",
+    "scenario_pack": "resilience_stress",
     "categories": [],
     "max_turns": 6,
     "per_category": 2,

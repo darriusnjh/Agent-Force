@@ -3,6 +3,7 @@ import os
 import sys
 
 import streamlit as st
+from dotenv import load_dotenv
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -25,6 +26,8 @@ from components.metric_cards import pulsing_dot_html
 from components.sidebar import render_sidebar
 from components.topnav import render_page_header, render_topnav
 from config import COLORS
+
+load_dotenv()
 
 ATTACK_CATEGORIES = [
     "data_boundary",
@@ -341,19 +344,11 @@ with tab_attack:
         unsafe_allow_html=True,
     )
 
-    stored_key = st.session_state.get("openai_api_key", "")
-    openai_key = st.text_input(
-        "OpenAI API Key (Required to enable attack-kit actions)",
-        type="password",
-        value=stored_key,
-        help="Stored only in this Streamlit session.",
-    )
-    if openai_key:
-        st.session_state["openai_api_key"] = openai_key.strip()
-
-    key_ready = bool(st.session_state.get("openai_api_key", "").strip())
+    key_ready = bool(os.getenv("OPENAI_API_KEY", "").strip())
     if not key_ready:
-        st.warning("Enter an OpenAI API key to enable scenario generation and attack runs.")
+        st.warning("Set `OPENAI_API_KEY` in your `.env` to enable attack-kit actions.")
+    else:
+        st.info("`OPENAI_API_KEY` detected from environment. Attack-kit actions are enabled.")
     if not alive:
         st.warning("Backend API is offline. Attack-kit actions require the API server.")
 
@@ -401,7 +396,14 @@ with tab_attack:
         )
 
     with c2:
-        scenario_pack = st.selectbox("Scenario Pack", ["default", "openclaw"], index=1)
+        scenario_pack_label = st.selectbox(
+            "Scenario Family",
+            ["Baseline Coverage", "Resilience Stress"],
+            index=1,
+        )
+        scenario_pack = (
+            "resilience_stress" if scenario_pack_label == "Resilience Stress" else "baseline_coverage"
+        )
         sandbox_agent = st.selectbox("Sandbox Agent Profile", ["email", "web_search", "code_exec"])
         autonomy_level = st.selectbox("Autonomy Level", ["suggest", "act_with_confirm", "act"], index=1)
         memory_mode = st.selectbox("Memory Mode", ["session", "persistent", "none"])

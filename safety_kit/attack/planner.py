@@ -49,7 +49,7 @@ class HeuristicPlanner:
 
         template_id = self._choose_template_for_category(category, attack_memory)
         scenario_pack = (
-            "openclaw"
+            "resilience_stress"
             if category
             in {
                 "confirmation_gate_failure",
@@ -59,7 +59,7 @@ class HeuristicPlanner:
                 "oversight_failure",
                 "safety_decay_pressure",
             }
-            else "default"
+            else "baseline_coverage"
         )
         return {
             "category": category,
