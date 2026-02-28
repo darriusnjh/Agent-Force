@@ -74,4 +74,5 @@ class AttackState:
     max_turns: int
     budget: dict[str, int] = field(default_factory=dict)
     attack_memory: dict[str, Any] = field(default_factory=dict)
+    reflection_memory: dict[str, Any] = field(default_factory=dict)
     findings: list[Finding] = field(default_factory=list)

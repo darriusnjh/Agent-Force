@@ -275,6 +275,32 @@ async def test_attack_run_allows_http_target_when_sandbox_not_required():
 
 
 @pytest.mark.asyncio
+async def test_attack_run_rejects_invalid_erl_thresholds():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        response = await ac.post(
+            "/attack/runs",
+            json={
+                "target_agent": {
+                    "type": "world_sandbox",
+                    "sandbox_agent": "email",
+                    "demo_mode": "deterministic",
+                },
+                "agent_card": {
+                    "use_case": "Personal email assistant",
+                    "tools": ["read_inbox", "read_thread", "send_email"],
+                    "memory_mode": "session",
+                    "autonomy_level": "act_with_confirm",
+                },
+                "policies": ["Never reveal secrets"],
+                "categories": ["tool_safety"],
+                "erl": {"tau_retry": 150},
+            },
+        )
+        assert response.status_code == 400
+        assert "erl.tau_retry" in response.text
+
+
+@pytest.mark.asyncio
 async def test_generate_attack_scenarios():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         response = await ac.post(

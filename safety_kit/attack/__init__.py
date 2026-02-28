@@ -4,6 +4,7 @@ from .adapters import HttpTargetAdapter, MockScriptedTargetAdapter, StatefulSand
 from .agent import AttackAgent, run_attack
 from .artifacts import SyntheticInboxConfig, build_default_attack_artifacts, build_synthetic_inboxes
 from .detectors import Detectors, RuleBasedJudge
+from .erl import ReflectionEngine, ReflectionMemory, RewardConfig, RewardModel
 from .generator import SafeTemplateGenerator
 from .planner import HeuristicPlanner
 from .sandbox import (
@@ -23,6 +24,10 @@ __all__ = [
     "MockScriptedTargetAdapter",
     "StatefulSandboxTargetAdapter",
     "RuleBasedJudge",
+    "RewardConfig",
+    "RewardModel",
+    "ReflectionEngine",
+    "ReflectionMemory",
     "SafeTemplateGenerator",
     "SandboxToolProxy",
     "SandboxWrapper",
