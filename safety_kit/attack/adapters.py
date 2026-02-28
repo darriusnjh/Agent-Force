@@ -20,21 +20,89 @@ class HttpTargetAdapter:
         context: dict[str, Any],
         tool_proxy: Any,
     ) -> dict[str, Any]:
-        del tool_proxy
-
         headers: dict[str, str] = {}
         if self.auth:
             headers["Authorization"] = self.auth
 
         payload = {
             "user_msg": user_msg,
-            "context": context,
+            "context": self._http_context(context),
+            "sandbox_contract": {
+                "tool_calls": (
+                    "Return either `requested_tool_calls` to let sandbox execute tools, "
+                    "or `tool_calls` if your agent already includes structured calls."
+                ),
+                "requested_tool_call_schema": {
+                    "tool": "tool.name",
+                    "args": {"any": "json"},
+                    "confirmed": False,
+                },
+            },
         }
         async with httpx.AsyncClient(timeout=self.timeout_s) as client:
             response = await client.post(self.endpoint, json=payload, headers=headers)
             response.raise_for_status()
             data = response.json()
-        return data if isinstance(data, dict) else {"assistant_text": str(data)}
+
+        if not isinstance(data, dict):
+            return {"assistant_text": str(data), "tool_calls": [], "memory_events": []}
+
+        requested_calls = data.get("requested_tool_calls", []) or []
+        executed_calls: list[dict[str, Any]] = []
+        for call in requested_calls:
+            if not isinstance(call, dict):
+                continue
+            tool = str(call.get("tool", "")).strip()
+            if not tool:
+                continue
+            args = call.get("args", {}) or {}
+            confirmed = bool(call.get("confirmed", False))
+            result = await tool_proxy.invoke(tool=tool, args=dict(args), confirmed=confirmed)
+            executed_calls.append(
+                {
+                    "tool": tool,
+                    "args": dict(args),
+                    "result": result,
+                    "confirmed": confirmed,
+                }
+            )
+
+        reported_calls = data.get("tool_calls", []) or []
+        tool_calls = reported_calls if isinstance(reported_calls, list) and reported_calls else executed_calls
+        return {
+            "assistant_text": str(data.get("assistant_text", "")),
+            "tool_calls": tool_calls,
+            "memory_events": data.get("memory_events", []) or [],
+        }
+
+    @staticmethod
+    def _http_context(context: dict[str, Any]) -> dict[str, Any]:
+        """Send a compact context payload to BYO HTTP agents."""
+        if not isinstance(context, dict):
+            return {}
+
+        compact = dict(context)
+        artifacts = compact.get("artifacts")
+        if isinstance(artifacts, dict):
+            compact["artifacts"] = {
+                "sandbox_profile": str(artifacts.get("sandbox_profile", "email")),
+                "active_inbox_key": str(artifacts.get("active_inbox_key", "inbox")),
+                "inbox_counts": {
+                    "inbox": len(artifacts.get("inbox", [])) if isinstance(artifacts.get("inbox"), list) else 0,
+                    "inbox_toy": (
+                        len(artifacts.get("inbox_toy", [])) if isinstance(artifacts.get("inbox_toy"), list) else 0
+                    ),
+                    "inbox_large": (
+                        len(artifacts.get("inbox_large", []))
+                        if isinstance(artifacts.get("inbox_large"), list)
+                        else 0
+                    ),
+                },
+                "file_paths": sorted(list((artifacts.get("files", {}) or {}).keys()))[:12],
+                "honeytokens": list((artifacts.get("honeytokens", {}) or {}).keys()),
+                "webhooks": list((artifacts.get("webhooks", {}) or {}).keys()),
+            }
+        return compact
 
 
 class MockScriptedTargetAdapter:

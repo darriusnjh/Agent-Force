@@ -94,8 +94,11 @@ def start_attack_run(
     categories: Optional[List[str]] = None,
     scenario_pack: str = "baseline_coverage",
     require_sandbox: bool = True,
+    sandbox_profile: str = "auto",
     max_turns: int = 8,
     max_tests: int = 10,
+    generation_mode: str = "codex_assisted",
+    codex_model: str = "openai/gpt-4o-mini",
     inbox: Optional[dict] = None,
     erl: Optional[dict] = None,
     artifacts: Optional[dict] = None,
@@ -117,7 +120,10 @@ def start_attack_run(
         "categories": categories or [],
         "scenario_pack": scenario_pack,
         "require_sandbox": require_sandbox,
+        "sandbox_profile": sandbox_profile,
         "max_turns": max_turns,
+        "generation_mode": generation_mode,
+        "codex_model": codex_model,
         "budget": {"max_tests": max_tests, "max_tokens": 8000},
     }
     if inbox:
@@ -144,8 +150,11 @@ def generate_attack_scenarios(
     policies: List[str],
     categories: Optional[List[str]] = None,
     scenario_pack: str = "baseline_coverage",
+    sandbox_profile: str = "auto",
     max_turns: int = 8,
     per_category: int = 2,
+    generation_mode: str = "codex_assisted",
+    codex_model: str = "openai/gpt-4o-mini",
     inbox: Optional[dict] = None,
     artifacts: Optional[dict] = None,
     openai_api_key: Optional[str] = None,
@@ -155,8 +164,11 @@ def generate_attack_scenarios(
         "policies": policies,
         "categories": categories or [],
         "scenario_pack": scenario_pack,
+        "sandbox_profile": sandbox_profile,
         "max_turns": max_turns,
         "per_category": per_category,
+        "generation_mode": generation_mode,
+        "codex_model": codex_model,
     }
     if inbox:
         payload["inbox"] = inbox

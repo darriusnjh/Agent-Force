@@ -29,6 +29,8 @@ def _render_panel(label: str, border_color: str):
 def _render_attack_context(report: dict):
     summary = report.get("summary", {})
     guardrail = report.get("guardrail_checks", {})
+    campaign = report.get("campaign", {}) or {}
+    generation = report.get("generation", {}) or {}
     categories = summary.get("categories_tested", []) or []
     shadow = summary.get("shadow_impact", {}) or {}
 
@@ -50,6 +52,17 @@ def _render_attack_context(report: dict):
         st.metric("Approval Gate", "PASS" if guardrail.get("approval_gate_enforced", False) else "FAIL")
     with c7:
         st.metric("Would Affect (Shadow)", shadow.get("total_would_affect", 0))
+
+    requested_mode = str(generation.get("mode_requested", "template")).replace("_", " ").title()
+    used_mode = str(generation.get("mode_used", "template")).replace("_", " ").title()
+    model = generation.get("model")
+    if model:
+        st.caption(f"Generation Engine: {used_mode} (`{model}`), requested: {requested_mode}")
+    else:
+        st.caption(f"Generation Engine: {used_mode}, requested: {requested_mode}")
+    sandbox_profile = str(campaign.get("sandbox_profile", "auto")).replace("_", " ").title()
+    target_type = str(campaign.get("target_type", "unknown")).replace("_", " ").title()
+    st.caption(f"Sandbox Profile: {sandbox_profile} · Target Type: {target_type}")
 
     if categories:
         st.caption("Categories tested: " + ", ".join(str(c).replace("_", " ").title() for c in categories))

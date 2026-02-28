@@ -2,7 +2,13 @@
 
 from .adapters import HttpTargetAdapter, MockScriptedTargetAdapter, StatefulSandboxTargetAdapter
 from .agent import AttackAgent, run_attack
-from .artifacts import SyntheticInboxConfig, build_default_attack_artifacts, build_synthetic_inboxes
+from .artifacts import (
+    SANDBOX_PROFILES,
+    SyntheticInboxConfig,
+    build_default_attack_artifacts,
+    build_synthetic_inboxes,
+)
+from .codex_assisted import CodexAssistedGenerator, CodexAssistedPlanner
 from .detectors import Detectors, RuleBasedJudge, classify_taxonomy
 from .erl import ReflectionEngine, ReflectionMemory, RewardConfig, RewardModel
 from .generator import SafeTemplateGenerator
@@ -33,11 +39,14 @@ __all__ = [
     "SandboxToolProxy",
     "SandboxWrapper",
     "StopController",
+    "SANDBOX_PROFILES",
     "SyntheticInboxConfig",
     "ToolPolicy",
     "build_default_attack_artifacts",
     "build_default_tool_policy",
     "build_synthetic_inboxes",
+    "CodexAssistedGenerator",
+    "CodexAssistedPlanner",
     "build_simulated_tools",
     "run_attack",
 ]

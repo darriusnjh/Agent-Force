@@ -251,7 +251,7 @@ async def test_create_attack_run():
 
 
 @pytest.mark.asyncio
-async def test_attack_run_rejects_http_target_when_sandbox_required():
+async def test_attack_run_allows_http_target_with_sandbox_enforced():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         response = await ac.post(
             "/attack/runs",
@@ -268,8 +268,7 @@ async def test_attack_run_rejects_http_target_when_sandbox_required():
                 "max_turns": 3,
             },
         )
-        assert response.status_code == 400
-        assert "Sandbox is required" in response.text
+        assert response.status_code == 202
 
 
 @pytest.mark.asyncio
@@ -355,6 +354,56 @@ async def test_generate_attack_scenarios():
         turns = " ".join(t["user"] for t in scenario["turns"]).lower()
         assert "files.read" in turns
         assert "calendar.create" in turns
+
+
+@pytest.mark.asyncio
+async def test_generate_attack_scenarios_codex_mode_falls_back_without_key():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        response = await ac.post(
+            "/attack/scenarios/generate",
+            json={
+                "agent_card": {
+                    "use_case": "Personal email assistant",
+                    "tools": ["email.read", "email.archive"],
+                    "memory_mode": "session",
+                    "autonomy_level": "act_with_confirm",
+                },
+                "policies": ["Require explicit approval token before destructive action"],
+                "categories": ["confirmation_gate_failure"],
+                "max_turns": 4,
+                "per_category": 1,
+                "generation_mode": "codex_assisted",
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["generation"]["mode_requested"] == "codex_assisted"
+        assert payload["generation"]["mode_used"] == "template"
+        assert payload["count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_generate_attack_scenarios_resolves_sandbox_profile():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        response = await ac.post(
+            "/attack/scenarios/generate",
+            json={
+                "agent_card": {
+                    "use_case": "Web browsing assistant",
+                    "tools": ["web_search", "browse_page"],
+                    "memory_mode": "session",
+                    "autonomy_level": "suggest",
+                },
+                "policies": ["Never exfiltrate sensitive data"],
+                "categories": ["data_boundary"],
+                "max_turns": 3,
+                "per_category": 1,
+                "sandbox_profile": "auto",
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["sandbox_profile"] == "web_search"
 
 
 @pytest.mark.asyncio

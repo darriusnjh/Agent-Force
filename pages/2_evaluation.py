@@ -263,9 +263,23 @@ with tab_attack:
     elif key_ready:
         st.info("Using `OPENAI_API_KEY` from environment for attack-kit actions.")
     else:
-        st.warning("Provide an OpenAI API key in this field or set `OPENAI_API_KEY` in `.env`.")
+        st.info(
+            "No OpenAI API key provided yet. "
+            "Template-baseline runs still work; Codex-assisted generation needs a key."
+        )
     if not alive:
         st.warning("Backend API is offline. Attack-kit actions require the API server.")
+
+    _render_panel("SETUP GUIDE", "rgba(0,212,255,0.18)")
+    st.markdown(
+        """
+1. **Step 1: Target Agent**: choose built-in sandbox demo agent, your own HTTP endpoint, or a mock script.
+2. **Step 2: Sandbox + Permissions**: choose sandbox profile and permission limits for safe testing.
+3. **Step 3: Test Plan**: choose baseline/stress coverage and optional scenario themes.
+4. **Step 4: Run / Preview**: preview scenarios first, then run attack evaluation and view standardized results.
+"""
+    )
+    st.markdown("</div>", unsafe_allow_html=True)
 
     with st.expander("How this Attack Kit run works", expanded=False):
         st.markdown(
@@ -275,6 +289,10 @@ with tab_attack:
 
 **Optional Stress Add-ons**
 - Adds compaction, stop-control, and batching pressure scenarios.
+
+**Codex-Assisted Test Generation**
+- Uses Codex to adapt scenario wording and pressure based on your agent card and policies.
+- Falls back to deterministic templates if no API key is supplied.
 
 **Sandbox First**
 - Uses synthetic data and tool proxies by default to avoid real side effects.
@@ -366,9 +384,153 @@ with tab_attack:
         st.session_state["attack_http_auth"] = ""
     if "attack_mock_script" not in st.session_state:
         st.session_state["attack_mock_script"] = "[]"
+    if "attack_target_mode" not in st.session_state:
+        st.session_state["attack_target_mode"] = "Sandbox Demo Agent"
+    if "attack_sandbox_profile" not in st.session_state:
+        st.session_state["attack_sandbox_profile"] = "Auto (Recommended)"
+
+    _render_panel("STEP 1 — TARGET AGENT", "rgba(255,107,53,0.22)")
+    target_mode = st.selectbox(
+        "Target Agent Source",
+        ["Sandbox Demo Agent", "Your Agent via HTTP Endpoint", "Mock Scripted Agent"],
+        key="attack_target_mode",
+        help="Use your own HTTP endpoint to test a personal/custom agent with sandbox artifacts and guardrails.",
+    )
+    target_world_pack = "acme_corp_v1"
+    target_demo_mode = "deterministic"
+    target_trace_level = "full"
+    target_endpoint = ""
+    target_auth = ""
+    target_mock_script = []
+    require_sandbox = True
+
+    default_sandbox_agent = default_agent if default_agent in ("email", "web_search", "code_exec", "jira") else "email"
+    sandbox_agent = default_sandbox_agent
+
+    if target_mode == "Sandbox Demo Agent":
+        tc1, tc2 = st.columns(2)
+        with tc1:
+            default_agent_index = ["email", "web_search", "code_exec", "jira"].index(default_sandbox_agent)
+            sandbox_agent = st.selectbox(
+                "Demo Agent Profile",
+                ["email", "web_search", "code_exec", "jira"],
+                index=default_agent_index,
+                help="Built-in agent profile used when testing inside the provided sandbox.",
+            )
+            target_world_pack = st.text_input(
+                "World Pack",
+                value="acme_corp_v1",
+                help="Synthetic world data pack for sandbox execution.",
+            )
+        with tc2:
+            target_demo_mode = st.selectbox(
+                "Sandbox Mode",
+                ["deterministic", "live_hybrid"],
+                help="Deterministic is stable for demos. Live hybrid uses model behavior.",
+            )
+            target_trace_level = st.selectbox(
+                "Trace Detail",
+                ["full", "summary"],
+                help="Controls level of sandbox trace detail.",
+            )
+            st.text_area(
+                "MCP Registry Links (optional, one URL per line)",
+                key="attack_mcp_registry_links",
+                height=90,
+                help="Optional MCP registry URLs used by the sandbox runtime.",
+            )
+    elif target_mode == "Your Agent via HTTP Endpoint":
+        st.info(
+            "Your endpoint is tested in sandbox mode: scenarios run with synthetic artifacts and tool-policy checks."
+        )
+        target_endpoint = st.text_input(
+            "Target HTTP Endpoint",
+            key="attack_http_endpoint",
+            help="Endpoint that accepts {user_msg, context} and returns {assistant_text, tool_calls|requested_tool_calls}.",
+        )
+        target_auth = st.text_input(
+            "Authorization Header (optional)",
+            key="attack_http_auth",
+            help="Optional Authorization header, e.g. Bearer <token>.",
+        )
+        require_sandbox = st.toggle(
+            "Enforce Sandbox Guardrails",
+            value=True,
+            help="When ON, tool boundaries, approval tokens, and stop-channel checks are enforced in harness.",
+        )
+        with st.expander("HTTP Integration Contract", expanded=False):
+            st.code(
+                """Request JSON:
+{
+  "user_msg": "...",
+  "context": {...sandbox metadata...},
+  "sandbox_contract": {...}
+}
+
+Response JSON (either format):
+{
+  "assistant_text": "...",
+  "requested_tool_calls": [{"tool": "email.delete", "args": {...}, "confirmed": false}],
+  "memory_events": []
+}
+or
+{
+  "assistant_text": "...",
+  "tool_calls": [{"tool": "email.delete", "args": {...}}],
+  "memory_events": []
+}""",
+                language="json",
+            )
+    else:
+        mock_script_raw = st.text_area(
+            "Mock Script (JSON array)",
+            key="attack_mock_script",
+            height=120,
+            help="Deterministic scripted responses for harness-only testing.",
+        )
+        try:
+            target_mock_script = _parse_json_list(mock_script_raw)
+        except Exception as exc:
+            st.error(f"Mock script JSON error: {exc}")
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    _render_panel("STEP 2 — SANDBOX PROFILE & PERMISSIONS", "rgba(0,255,178,0.2)")
+    p1, p2 = st.columns(2)
+    with p1:
+        sandbox_profile_label = st.selectbox(
+            "Sandbox Profile",
+            ["Auto (Recommended)", "email", "web_search", "code_exec", "generic"],
+            key="attack_sandbox_profile",
+            help="Select sandbox artifact profile. Auto infers from target type/use case/tools.",
+        )
+        operation_mode = st.selectbox(
+            "Operation Mode",
+            ["shadow", "safe"],
+            help="`shadow` simulates side effects; `safe` blocks direct side effects.",
+        )
+    with p2:
+        autonomy_level = st.selectbox(
+            "Autonomy Level",
+            ["suggest", "act_with_confirm", "act"],
+            index=1,
+            help="Expected target autonomy; used by approval/oversight checks.",
+        )
+        max_privilege = st.selectbox(
+            "Max Privilege",
+            ["user", "elevated", "admin", "system"],
+            index=1,
+            help="Highest privilege the target is allowed to use in tests.",
+        )
+        memory_mode = st.selectbox(
+            "Memory Mode",
+            ["session", "persistent", "none"],
+            help="Used for memory-integrity and context-retention scenarios.",
+        )
+    st.markdown("</div>", unsafe_allow_html=True)
 
     c1, c2 = st.columns([1.5, 1])
     with c1:
+        _render_panel("STEP 3 — TEST PLAN", "rgba(123,97,255,0.2)")
         coverage_profile = st.selectbox(
             "Coverage Profile",
             [
@@ -383,27 +545,26 @@ with tab_attack:
             list(scenario_theme_map.keys()),
             help="Adds extra scenario families to the baseline plan.",
         )
+        generation_engine = st.selectbox(
+            "Test Generation Engine",
+            ["Codex-Assisted (Recommended)", "Template Baseline"],
+            help=(
+                "Codex-Assisted dynamically contextualizes test scripts to your agent profile and policies. "
+                "Template Baseline uses deterministic built-in templates only."
+            ),
+        )
+        generation_mode = "codex_assisted" if generation_engine.startswith("Codex-Assisted") else "template"
+        st.markdown("</div>", unsafe_allow_html=True)
 
     with c2:
-        default_sandbox_agent = default_agent if default_agent in ("email", "web_search", "code_exec", "jira") else "email"
-        default_agent_index = ["email", "web_search", "code_exec", "jira"].index(default_sandbox_agent)
-        sandbox_agent = st.selectbox(
-            "Sandbox Agent Profile",
-            ["email", "web_search", "code_exec", "jira"],
-            index=default_agent_index,
-            help="Built-in synthetic agent profile used for sandbox execution.",
-        )
         campaign_depth = st.selectbox(
             "Campaign Depth",
             ["Quick", "Standard", "Deep"],
             index=1,
             help="Controls test volume and turn depth.",
         )
-        operation_mode = st.selectbox(
-            "Operation Mode",
-            ["shadow", "safe"],
-            help="`shadow` simulates side effects for impact estimates. `safe` blocks direct side effects.",
-        )
+
+    sandbox_profile = "auto" if sandbox_profile_label.startswith("Auto") else sandbox_profile_label
 
     if coverage_profile == "Comprehensive Baseline (Recommended)":
         scenario_pack = "baseline_coverage"
@@ -439,131 +600,28 @@ with tab_attack:
     )
     st.markdown("</div>", unsafe_allow_html=True)
 
-    with st.expander("Advanced Overrides (optional)", expanded=False):
+    with st.expander("Step 4 — Agent Card & Policy Inputs (Advanced)", expanded=False):
         use_case = st.text_input(
             "Use Case",
             key="attack_use_case",
-            help="Target agent job description used for dynamic scenario generation.",
+            help="Short description of what the target agent is supposed to do.",
         )
         tools_input = st.text_area(
             "Tools (comma separated)",
             key="attack_tools_input",
             height=80,
-            help="Declared target tools used to craft boundary and policy checks.",
+            help="Declared target tools used for scenario generation and permission checks.",
         )
         policy_input = st.text_area(
             "Policies (one per line)",
             key="attack_policies",
             height=90,
-            help="Hard rules the attack campaign should verify.",
+            help="Guardrails that the campaign verifies turn-by-turn.",
         )
-        target_mode = st.selectbox(
-            "Target Runtime",
-            ["Sandbox Agent (Recommended)", "Custom HTTP Agent", "Mock Scripted Agent"],
-        )
-        target_world_pack = "acme_corp_v1"
-        target_demo_mode = "deterministic"
-        target_trace_level = "full"
-        target_endpoint = ""
-        target_auth = ""
-        target_mock_script = []
-        require_sandbox = True
 
-        if target_mode == "Sandbox Agent (Recommended)":
-            target_world_pack = st.text_input(
-                "World Pack",
-                value="acme_corp_v1",
-                help="Sandbox world profile used for synthetic environment state.",
-            )
-            target_demo_mode = st.selectbox(
-                "Sandbox Demo Mode",
-                ["deterministic", "live_hybrid"],
-                help="Deterministic mode is stable for demos; live_hybrid uses live-model behavior.",
-            )
-            target_trace_level = st.selectbox(
-                "Trace Level",
-                ["full", "summary"],
-                help="Controls sandbox trace artifact detail level.",
-            )
-            st.text_area(
-                "MCP Registry Links (one URL per line)",
-                key="attack_mcp_registry_links",
-                height=80,
-                help="Optional MCP registry URLs for sandbox-side manifest resolution.",
-            )
-        elif target_mode == "Custom HTTP Agent":
-            target_endpoint = st.text_input(
-                "Target HTTP Endpoint",
-                key="attack_http_endpoint",
-                help="Your target agent endpoint. Payload shape: {user_msg, context}.",
-            )
-            target_auth = st.text_input(
-                "Authorization Header (optional)",
-                key="attack_http_auth",
-                help="Value passed as Authorization header, e.g. Bearer <token>.",
-            )
-            require_sandbox = st.toggle(
-                "Require Sandbox",
-                value=False,
-                help="Must be OFF for direct HTTP target execution.",
-            )
-        else:
-            mock_script_raw = st.text_area(
-                "Mock Script (JSON array)",
-                key="attack_mock_script",
-                height=100,
-                help="Optional scripted sequence for deterministic mock-target testing.",
-            )
-            try:
-                target_mock_script = _parse_json_list(mock_script_raw)
-            except Exception as exc:
-                st.error(f"Mock script JSON error: {exc}")
-
-        autonomy_level = st.selectbox(
-            "Autonomy Level",
-            ["suggest", "act_with_confirm", "act"],
-            index=1,
-            help="Expected operating autonomy. Higher autonomy increases direct-action stress tests.",
-        )
-        memory_mode = st.selectbox(
-            "Memory Mode",
-            ["session", "persistent", "none"],
-            help="Defines whether instruction-retention and memory-poisoning scenarios are included.",
-        )
-        max_privilege = st.selectbox(
-            "Max Privilege",
-            ["user", "elevated", "admin", "system"],
-            index=1,
-            help="Highest privilege tier the target should access; violations above this are flagged.",
-        )
-    if "target_mode" not in locals():
-        target_mode = "Sandbox Agent (Recommended)"
-    if "use_case" not in locals():
-        use_case = st.session_state.get("attack_use_case", "Personal email assistant")
-    if "tools_input" not in locals():
-        tools_input = st.session_state.get("attack_tools_input", default_tools.get(default_agent, default_tools["default"]))
-    if "policy_input" not in locals():
-        policy_input = st.session_state.get("attack_policies", "")
-    if "autonomy_level" not in locals():
-        autonomy_level = "act_with_confirm"
-    if "memory_mode" not in locals():
-        memory_mode = "session"
-    if "max_privilege" not in locals():
-        max_privilege = "elevated"
-    if "target_world_pack" not in locals():
-        target_world_pack = "acme_corp_v1"
-    if "target_demo_mode" not in locals():
-        target_demo_mode = "deterministic"
-    if "target_trace_level" not in locals():
-        target_trace_level = "full"
-    if "target_endpoint" not in locals():
-        target_endpoint = ""
-    if "target_auth" not in locals():
-        target_auth = ""
-    if "target_mock_script" not in locals():
-        target_mock_script = []
-    if "require_sandbox" not in locals():
-        require_sandbox = True
+    use_case = st.session_state.get("attack_use_case", "Personal email assistant")
+    tools_input = st.session_state.get("attack_tools_input", default_tools.get(default_agent, default_tools["default"]))
+    policy_input = st.session_state.get("attack_policies", "")
 
     tools = _parse_csv_items(tools_input)
     policies = [line.strip() for line in policy_input.splitlines() if line.strip()]
@@ -586,19 +644,28 @@ with tab_attack:
         "max_privilege": max_privilege,
     }
 
+    requires_key = generation_mode == "codex_assisted" or (
+        target_mode == "Sandbox Demo Agent" and target_demo_mode == "live_hybrid"
+    )
+    key_gate_ok = key_ready or not requires_key
+    if not key_gate_ok:
+        st.warning(
+            "This configuration needs an OpenAI API key (Codex-assisted generation and/or live_hybrid mode)."
+        )
+
     btn1, btn2 = st.columns([1, 1])
     with btn1:
         generate_clicked = st.button(
             "PREVIEW SCENARIOS",
             use_container_width=True,
-            disabled=not (alive and key_ready),
+            disabled=not (alive and key_gate_ok),
             help="Shows the exact scenario scripts that will be executed.",
         )
     with btn2:
         run_attack_clicked = st.button(
             "RUN ATTACK EVALUATION",
             use_container_width=True,
-            disabled=not (alive and key_ready),
+            disabled=not (alive and key_gate_ok),
             help="Runs the full campaign and opens standardized results view.",
         )
 
@@ -610,8 +677,11 @@ with tab_attack:
                     policies=policies,
                     categories=selected_categories,
                     scenario_pack=scenario_pack,
+                    sandbox_profile=sandbox_profile,
                     max_turns=max_turns,
                     per_category=per_category,
+                    generation_mode=generation_mode,
+                    codex_model="openai/gpt-4o-mini",
                     inbox={"toy_count": 10, "realistic_count": 5000, "canary_count": 5},
                     openai_api_key=effective_openai_key,
                 )
@@ -644,7 +714,7 @@ with tab_attack:
     if run_attack_clicked:
         with st.status("Running attack campaign...", expanded=True) as status_box:
             try:
-                if target_mode == "Sandbox Agent (Recommended)":
+                if target_mode == "Sandbox Demo Agent":
                     target_agent_payload = {
                         "type": "world_sandbox",
                         "sandbox_agent": sandbox_agent,
@@ -653,9 +723,9 @@ with tab_attack:
                         "trace_level": target_trace_level,
                         "mcp_registry_links": mcp_registry_links,
                     }
-                elif target_mode == "Custom HTTP Agent":
+                elif target_mode == "Your Agent via HTTP Endpoint":
                     if not target_endpoint.strip():
-                        raise ValueError("Target HTTP Endpoint is required for Custom HTTP Agent mode.")
+                        raise ValueError("Target HTTP Endpoint is required for HTTP endpoint mode.")
                     target_agent_payload = {
                         "type": "http",
                         "endpoint": target_endpoint.strip(),
@@ -674,8 +744,11 @@ with tab_attack:
                     categories=selected_categories,
                     scenario_pack=scenario_pack,
                     require_sandbox=require_sandbox,
+                    sandbox_profile=sandbox_profile,
                     max_turns=max_turns,
                     max_tests=max_tests,
+                    generation_mode=generation_mode,
+                    codex_model="openai/gpt-4o-mini",
                     inbox={"toy_count": 10, "realistic_count": 5000, "canary_count": 5},
                     erl={
                         "enable_reflection_retry": True,

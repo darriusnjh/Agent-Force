@@ -56,6 +56,7 @@ ATTACK_RESILIENCE_STRESS_CATEGORIES = [
 ]
 ATTACK_VALID_CATEGORIES = set(ATTACK_BASELINE_CATEGORIES + ATTACK_RESILIENCE_STRESS_CATEGORIES)
 ATTACK_VALID_SCENARIO_PACKS = {"baseline_coverage", "resilience_stress"}
+ATTACK_VALID_SANDBOX_PROFILES = {"auto", "email", "web_search", "code_exec", "generic"}
 ATTACK_SCENARIO_PACK_ALIASES = {
     "default": "baseline_coverage",
     "baseline": "baseline_coverage",
@@ -198,9 +199,12 @@ class AttackRunRequest(BaseModel):
     categories: list[str] = Field(default_factory=list)
     scenario_pack: str = "baseline_coverage"
     require_sandbox: bool = True
+    sandbox_profile: Literal["auto", "email", "web_search", "code_exec", "generic"] = "auto"
     max_turns: int = 8
     budget: AttackBudget = Field(default_factory=AttackBudget)
     inbox: AttackInboxConfig = Field(default_factory=AttackInboxConfig)
+    generation_mode: Literal["template", "codex_assisted"] = "codex_assisted"
+    codex_model: str = "openai/gpt-4o-mini"
     erl: AttackERLConfig = Field(default_factory=AttackERLConfig)
     artifacts: dict[str, Any] = Field(default_factory=dict)
 
@@ -212,8 +216,11 @@ class AttackScenarioRequest(BaseModel):
     policies: list[str] = Field(default_factory=list)
     categories: list[str] = Field(default_factory=list)
     scenario_pack: str = "baseline_coverage"
+    sandbox_profile: Literal["auto", "email", "web_search", "code_exec", "generic"] = "auto"
     max_turns: int = 8
     per_category: int = 2
+    generation_mode: Literal["template", "codex_assisted"] = "codex_assisted"
+    codex_model: str = "openai/gpt-4o-mini"
     inbox: AttackInboxConfig = Field(default_factory=AttackInboxConfig)
     artifacts: dict[str, Any] = Field(default_factory=dict)
 
@@ -501,7 +508,11 @@ async def _run_evaluation(run_id: str, req: RunRequest) -> None:
         await store.fail_run(run_id, str(exc), metadata=metadata)
 
 
-def _default_attack_artifacts(inbox_cfg: Optional[AttackInboxConfig] = None) -> Dict[str, Any]:
+def _default_attack_artifacts(
+    inbox_cfg: Optional[AttackInboxConfig] = None,
+    *,
+    sandbox_profile: str = "email",
+) -> Dict[str, Any]:
     """Synthetic artifacts exposed to the attack sandbox."""
     from safety_kit.attack import SyntheticInboxConfig, build_default_attack_artifacts
 
@@ -512,7 +523,7 @@ def _default_attack_artifacts(inbox_cfg: Optional[AttackInboxConfig] = None) -> 
             realistic_count=max(1, int(inbox_cfg.realistic_count)),
             canary_count=max(0, int(inbox_cfg.canary_count)),
         )
-    return build_default_attack_artifacts(cfg)
+    return build_default_attack_artifacts(cfg, profile=sandbox_profile)
 
 
 def _normalize_attack_scenario_pack(scenario_pack: str) -> str:
@@ -532,6 +543,33 @@ def _resolve_attack_categories(categories: list[str], scenario_pack: str) -> lis
     return list(ATTACK_BASELINE_CATEGORIES)
 
 
+def _resolve_sandbox_profile(
+    *,
+    requested_profile: str,
+    agent_card: dict[str, Any],
+    target: Optional[AttackTarget] = None,
+) -> str:
+    profile = str(requested_profile or "auto").strip().lower()
+    if profile in ATTACK_VALID_SANDBOX_PROFILES and profile != "auto":
+        return profile
+
+    if target is not None:
+        if target.type == "world_sandbox":
+            candidate = str(target.sandbox_agent or "").strip().lower()
+            if candidate in {"email", "web_search", "code_exec"}:
+                return candidate
+
+    tools = [str(t).lower() for t in agent_card.get("tools", [])]
+    use_case = str(agent_card.get("use_case", "")).lower()
+    joined = " ".join([use_case, *tools])
+
+    if any(token in joined for token in ("search", "browse", "web")):
+        return "web_search"
+    if any(token in joined for token in ("code", "python", "exec", "repo", "file")):
+        return "code_exec"
+    return "email"
+
+
 async def _run_attack_campaign(
     run_id: str,
     req: AttackRunRequest,
@@ -539,8 +577,12 @@ async def _run_attack_campaign(
 ) -> None:
     """Execute defensive attack/test loop and persist findings."""
     from safety_kit.attack import (
+        CodexAssistedGenerator,
+        CodexAssistedPlanner,
+        HeuristicPlanner,
         HttpTargetAdapter,
         MockScriptedTargetAdapter,
+        SafeTemplateGenerator,
         SandboxToolProxy,
         SandboxWrapper,
         StatefulSandboxTargetAdapter,
@@ -550,11 +592,17 @@ async def _run_attack_campaign(
     )
 
     agent_card = req.agent_card.model_dump()
+    sandbox_profile = _resolve_sandbox_profile(
+        requested_profile=req.sandbox_profile,
+        agent_card=agent_card,
+        target=req.target_agent,
+    )
     scenario_pack = _normalize_attack_scenario_pack(req.scenario_pack)
     categories = _resolve_attack_categories(req.categories, scenario_pack)
     policy = build_default_tool_policy(agent_card)
-    artifacts = _default_attack_artifacts(req.inbox)
+    artifacts = _default_attack_artifacts(req.inbox, sandbox_profile=sandbox_profile)
     artifacts.update(req.artifacts)
+    artifacts["sandbox_profile"] = sandbox_profile
 
     tool_proxy = SandboxToolProxy(
         policy=policy,
@@ -584,6 +632,26 @@ async def _run_attack_campaign(
 
     sandbox = SandboxWrapper(target_invoke_fn=target_adapter, tool_proxy=tool_proxy)
 
+    planner = None
+    generator = None
+    generation_mode_used = "template"
+    requested_generation_mode = str(req.generation_mode or "template")
+    if requested_generation_mode == "codex_assisted":
+        planner = CodexAssistedPlanner(
+            model=req.codex_model,
+            api_key=openai_api_key,
+            allow_env_api_key=False,
+            fallback=HeuristicPlanner(),
+        )
+        generator = CodexAssistedGenerator(
+            model=req.codex_model,
+            api_key=openai_api_key,
+            allow_env_api_key=False,
+            fallback=SafeTemplateGenerator(),
+        )
+        if bool(getattr(planner, "enabled", False)) and bool(getattr(generator, "enabled", False)):
+            generation_mode_used = "codex_assisted"
+
     payload = {
         "run_id": run_id,
         "agent_card": agent_card,
@@ -595,9 +663,24 @@ async def _run_attack_campaign(
         "erl": req.erl.model_dump(exclude={"reflection_memory"}),
         "reflection_memory": req.erl.reflection_memory,
         "artifacts": artifacts,
+        "campaign": {
+            "sandbox_profile": sandbox_profile,
+            "target_type": req.target_agent.type,
+            "require_sandbox": req.require_sandbox,
+        },
+        "generation": {
+            "mode_requested": requested_generation_mode,
+            "mode_used": generation_mode_used,
+            "model": req.codex_model if generation_mode_used == "codex_assisted" else None,
+        },
     }
 
-    report = await run_attack(sandbox=sandbox, payload=payload)
+    report = await run_attack(
+        sandbox=sandbox,
+        payload=payload,
+        planner=planner,
+        generator=generator,
+    )
     await store.finish_run(
         run_id,
         [
@@ -688,12 +771,6 @@ async def create_attack_run(
 
     if req.max_turns < 1 or req.max_turns > 20:
         raise HTTPException(400, "max_turns must be between 1 and 20")
-    if req.require_sandbox and req.target_agent.type == "http":
-        raise HTTPException(
-            400,
-            "Sandbox is required. Use target_agent.type='world_sandbox' or 'mock', "
-            "or set require_sandbox=false to allow direct HTTP target execution.",
-        )
     if req.erl.tau_retry < 0 or req.erl.tau_retry > 100:
         raise HTTPException(400, "erl.tau_retry must be between 0 and 100")
     if req.erl.tau_store < 0 or req.erl.tau_store > 100:
@@ -707,6 +784,11 @@ async def create_attack_run(
     config = {"mode": "attack", **req.model_dump()}
     config["scenario_pack"] = scenario_pack
     config["resolved_categories"] = categories
+    config["resolved_sandbox_profile"] = _resolve_sandbox_profile(
+        requested_profile=req.sandbox_profile,
+        agent_card=req.agent_card.model_dump(),
+        target=req.target_agent,
+    )
     await store.create_run(run_id, config)
 
     async def _runner() -> None:
@@ -740,8 +822,7 @@ async def generate_attack_scenarios(
     openai_api_key: Optional[str] = Header(default=None, alias="X-OpenAI-API-Key"),
 ) -> dict[str, Any]:
     """Generate contextualized defensive test scenarios from agent metadata."""
-    from safety_kit.attack import SafeTemplateGenerator
-    del openai_api_key
+    from safety_kit.attack import CodexAssistedGenerator, SafeTemplateGenerator
 
     scenario_pack = _normalize_attack_scenario_pack(req.scenario_pack)
     if not scenario_pack:
@@ -759,24 +840,57 @@ async def generate_attack_scenarios(
     if req.per_category < 1 or req.per_category > 10:
         raise HTTPException(400, "per_category must be between 1 and 10")
 
-    artifacts = _default_attack_artifacts(req.inbox)
-    artifacts.update(req.artifacts)
-
-    generator = SafeTemplateGenerator()
-    scenarios = generator.synthesize_scenarios(
+    sandbox_profile = _resolve_sandbox_profile(
+        requested_profile=req.sandbox_profile,
         agent_card=req.agent_card.model_dump(),
-        policies=req.policies,
-        categories=categories,
-        max_turns=req.max_turns,
-        artifacts=artifacts,
-        tool_specs=req.agent_card.tool_specs,
-        per_category=req.per_category,
-        scenario_pack=scenario_pack,
+        target=None,
     )
+    artifacts = _default_attack_artifacts(req.inbox, sandbox_profile=sandbox_profile)
+    artifacts.update(req.artifacts)
+    artifacts["sandbox_profile"] = sandbox_profile
+
+    requested_generation_mode = str(req.generation_mode or "template")
+    mode_used = "template"
+    if requested_generation_mode == "codex_assisted":
+        generator = CodexAssistedGenerator(
+            model=req.codex_model,
+            api_key=(openai_api_key or "").strip() or None,
+            allow_env_api_key=False,
+        )
+        scenarios = await generator.synthesize_scenarios(
+            agent_card=req.agent_card.model_dump(),
+            policies=req.policies,
+            categories=categories,
+            max_turns=req.max_turns,
+            artifacts=artifacts,
+            tool_specs=req.agent_card.tool_specs,
+            per_category=req.per_category,
+            scenario_pack=scenario_pack,
+        )
+        mode_used = generator.mode_used
+    else:
+        generator = SafeTemplateGenerator()
+        scenarios = generator.synthesize_scenarios(
+            agent_card=req.agent_card.model_dump(),
+            policies=req.policies,
+            categories=categories,
+            max_turns=req.max_turns,
+            artifacts=artifacts,
+            tool_specs=req.agent_card.tool_specs,
+            per_category=req.per_category,
+            scenario_pack=scenario_pack,
+        )
+
     return {
         "count": len(scenarios),
         "categories": categories,
         "scenario_pack": scenario_pack,
+        "sandbox_profile": sandbox_profile,
+        "generation": {
+            "mode_requested": requested_generation_mode,
+            "mode_used": mode_used,
+            "model": req.codex_model if mode_used == "codex_assisted" else None,
+        },
         "scenarios": scenarios,
     }
 
