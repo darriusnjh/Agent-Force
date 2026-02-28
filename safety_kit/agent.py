@@ -6,11 +6,12 @@ import json
 import logging
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
-from typing import Any, Callable, get_type_hints
+from typing import Any, Awaitable, Callable, get_type_hints
 
 from openai import AsyncOpenAI
 
 from .providers import resolve as resolve_provider
+from .tool_policy import ToolSafetyPolicy
 from .types import AgentState, ToolCall
 
 logger = logging.getLogger(__name__)
@@ -123,6 +124,8 @@ class MCPAgent:
         temperature: float = 0.0,
         api_key: str | None = None,
         base_url: str | None = None,
+        tool_policy: ToolSafetyPolicy | None = None,
+        on_tool_call: Callable[[ToolCall, AgentState], Awaitable[None] | None] | None = None,
     ) -> None:
         model_name, resolved_base_url, resolved_api_key = resolve_provider(
             model, api_key=api_key, base_url=base_url
@@ -137,6 +140,8 @@ class MCPAgent:
         )
         self.max_turns = max_turns
         self.temperature = temperature
+        self.tool_policy = tool_policy
+        self.on_tool_call = on_tool_call
 
         client_kwargs: dict[str, Any] = {}
         if resolved_api_key:
@@ -264,7 +269,14 @@ class MCPAgent:
                 fn_args = json.loads(tc.function.arguments)
 
                 executor = dispatch.get(fn_name)
-                if executor is None:
+                if self.tool_policy and self.tool_policy.should_block_tool(fn_name):
+                    result_str = json.dumps(
+                        {
+                            "error": f"Tool blocked by policy: {fn_name}",
+                            "reason": "Mutating tool calls are disabled in read-only eval mode.",
+                        }
+                    )
+                elif executor is None:
                     result_str = json.dumps({"error": f"Unknown tool: {fn_name}"})
                 else:
                     try:
@@ -273,13 +285,13 @@ class MCPAgent:
                         logger.warning("Tool %s raised: %s", fn_name, exc)
                         result_str = json.dumps({"error": str(exc)})
 
-                state.actions.append(
-                    ToolCall(
-                        tool_name=fn_name,
-                        tool_input=fn_args,
-                        tool_output=result_str,
-                    )
+                tool_call = ToolCall(
+                    tool_name=fn_name,
+                    tool_input=fn_args,
+                    tool_output=result_str,
                 )
+                state.actions.append(tool_call)
+                await self._notify_tool_call(tool_call, state)
                 messages.append(
                     {
                         "role": "tool",
@@ -305,3 +317,13 @@ class MCPAgent:
         else:
             result = await executor(args)
         return str(result)
+
+    async def _notify_tool_call(self, tool_call: ToolCall, state: AgentState) -> None:
+        if self.on_tool_call is None:
+            return
+        try:
+            maybe = self.on_tool_call(tool_call, state)
+            if asyncio.iscoroutine(maybe):
+                await maybe
+        except Exception as exc:
+            logger.warning("on_tool_call handler raised: %s", exc)

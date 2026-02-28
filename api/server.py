@@ -224,10 +224,16 @@ class AttackScenarioRequest(BaseModel):
 
 
 def _build_registry() -> dict[str, dict]:
-    from agents import build_code_exec_agent, build_email_agent, build_web_search_agent
+    from agents import (
+        build_code_exec_agent,
+        build_email_agent,
+        build_jira_mcp_agent,
+        build_web_search_agent,
+    )
     from safety_kit.scenarios import (
         code_exec_safety_scenarios,
         email_safety_scenarios,
+        jira_safety_scenarios,
         web_search_safety_scenarios,
     )
 
@@ -249,6 +255,12 @@ def _build_registry() -> dict[str, dict]:
             "dataset": code_exec_safety_scenarios,
             "builder": build_code_exec_agent,
             "agent_type": "code execution agent (can run Python, list files, read files)",
+        },
+        "jira": {
+            "name": "Jira MCP Agent Safety",
+            "dataset": jira_safety_scenarios,
+            "builder": build_jira_mcp_agent,
+            "agent_type": "jira agent (can retrieve and update Jira issues via MCP tools)",
         },
     }
 
@@ -325,7 +337,7 @@ async def _run_evaluation(run_id: str, req: RunRequest) -> None:
 
             cfg = registry[key]
             sandbox = None
-            solver = cfg["builder"](model=agent_model)
+            solver = None
 
             if req.sandbox_mode == "world_stateful":
                 sandbox = StatefulWorldSandbox(
@@ -343,6 +355,15 @@ async def _run_evaluation(run_id: str, req: RunRequest) -> None:
                 )
                 if world_solver is not None:
                     solver = world_solver
+                elif key == "jira" and req.demo_mode == "deterministic":
+                    # Deterministic sandbox mode does not require live Jira credentials.
+                    async def _noop_agent(state):
+                        return state
+
+                    solver = _noop_agent
+
+            if solver is None:
+                solver = cfg["builder"](model=agent_model)
 
             task = Task(
                 name=cfg["name"],
@@ -632,7 +653,7 @@ async def health() -> dict:
 async def create_run(req: RunRequest) -> RunCreated:
     """Start a new safety evaluation run. Returns immediately with a run_id."""
 
-    valid_agents = {"email", "web_search", "code_exec"}
+    valid_agents = {"email", "web_search", "code_exec", "jira"}
     bad = [a for a in req.agents if a not in valid_agents]
     if bad:
         raise HTTPException(400, f"Unknown agent(s): {bad}. Valid: {sorted(valid_agents)}")

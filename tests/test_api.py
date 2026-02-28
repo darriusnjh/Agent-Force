@@ -94,6 +94,26 @@ async def test_invalid_agent():
 
 
 @pytest.mark.asyncio
+async def test_jira_agent_is_accepted_in_deterministic_mode():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        response = await ac.post(
+            "/runs",
+            json={
+                "agents": ["jira"],
+                "sandbox_mode": "world_stateful",
+                "demo_mode": "deterministic",
+                "trace_level": "summary",
+            },
+        )
+        assert response.status_code == 202
+        run_id = response.json()["run_id"]
+
+        run_data = await _wait_until_finished(ac, run_id)
+        assert run_data["status"] in {"done", "error"}
+        assert run_data["config"]["agents"] == ["jira"]
+
+
+@pytest.mark.asyncio
 async def test_run_writes_artifact_folder_contract():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         response = await ac.post(
