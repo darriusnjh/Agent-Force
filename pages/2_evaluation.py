@@ -101,131 +101,6 @@ def _render_panel(label: str, border_color: str):
     )
 
 
-def _render_attack_report(report: dict):
-    summary = report.get("summary", {})
-    taxonomy = report.get("failure_taxonomy", {})
-    guardrail = report.get("guardrail_checks", {})
-    stress = report.get("autonomy_stress", {})
-    decay = report.get("safety_decay", {})
-    findings = report.get("findings", [])
-    risk_points = report.get("risk_evolution", [])
-
-    st.markdown(
-        f"""
-<div style="font-family:'Space Mono',monospace;font-size:9px;color:{COLORS['text_dim']};
-            letter-spacing:0.12em;text-transform:uppercase;margin:6px 0 14px 0;">
-  ATTACK CAMPAIGN REPORT
-</div>
-""",
-        unsafe_allow_html=True,
-    )
-
-    c1, c2, c3, c4 = st.columns(4)
-    with c1:
-        st.metric("Tests", summary.get("total_tests", 0))
-    with c2:
-        st.metric("Findings", summary.get("total_findings", 0))
-    with c3:
-        st.metric("Max Severity", f"{summary.get('max_severity', 0.0):.1f}")
-    with c4:
-        st.metric("Autonomy Stress Index", f"{summary.get('autonomy_stress_index', 0.0):.1f}")
-
-    c5, c6, c7 = st.columns(3)
-    shadow = summary.get("shadow_impact", {})
-    with c5:
-        st.metric("Would Delete", shadow.get("would_delete", 0))
-    with c6:
-        st.metric("Would Archive", shadow.get("would_archive", 0))
-    with c7:
-        st.metric("Risk Evolution Points", len(risk_points))
-
-    _render_panel("FAILURE TAXONOMY", "rgba(255,107,53,0.25)")
-    taxonomy_rows = []
-    for name, count in (taxonomy.get("counts") or {}).items():
-        taxonomy_rows.append(
-            {
-                "taxonomy": name,
-                "count": count,
-                "max_severity": (taxonomy.get("max_severity") or {}).get(name, 0.0),
-            }
-        )
-    if taxonomy_rows:
-        st.dataframe(taxonomy_rows, use_container_width=True, hide_index=True)
-    else:
-        st.info("No taxonomy findings available for this run.")
-    st.markdown("</div>", unsafe_allow_html=True)
-
-    _render_panel("DETERMINISTIC GUARDRAIL CHECKS", "rgba(0,212,255,0.25)")
-    checks = [
-        ("Stop Channel Enforced", guardrail.get("stop_channel_enforced", False)),
-        ("Approval Gate Enforced", guardrail.get("approval_gate_enforced", False)),
-        ("Privilege Boundaries Enforced", guardrail.get("privilege_boundaries_enforced", False)),
-    ]
-    for label, passed in checks:
-        color = COLORS["safe"] if passed else COLORS["danger"]
-        mark = "PASS" if passed else "FAIL"
-        st.markdown(
-            f"<div style='font-size:13px;margin:4px 0;color:{color};'><b>{mark}</b> — {label}</div>",
-            unsafe_allow_html=True,
-        )
-    st.caption(f"Blocked tool calls: {guardrail.get('blocked_tool_calls', 0)}")
-    st.markdown("</div>", unsafe_allow_html=True)
-
-    _render_panel("AUTONOMY STRESS & SAFETY DECAY", "rgba(123,97,255,0.25)")
-    s1, s2, s3 = st.columns(3)
-    with s1:
-        st.metric("Avg Tool Calls / Turn", f"{stress.get('avg_tool_calls_per_turn', 0.0):.2f}")
-    with s2:
-        st.metric("Max Tool Calls / Turn", stress.get("max_tool_calls_in_turn", 0))
-    with s3:
-        st.metric("Low→High Decay", str(decay.get("decay_delta_low_to_high")))
-
-    pressure_scores = decay.get("security_score_by_pressure", {})
-    pressure_rows = []
-    for level in ("low", "medium", "high"):
-        pressure_rows.append({"pressure": level, "security_score": pressure_scores.get(level)})
-    st.dataframe(pressure_rows, use_container_width=True, hide_index=True)
-    st.markdown("</div>", unsafe_allow_html=True)
-
-    _render_panel("RISK EVOLUTION", "rgba(0,255,178,0.25)")
-    if risk_points:
-        chart_rows = []
-        for row in risk_points:
-            chart_rows.append(
-                {
-                    "point": row.get("point"),
-                    "reward": row.get("reward"),
-                    "security_score": row.get("security_score"),
-                }
-            )
-        st.line_chart(chart_rows, x="point", y=["reward", "security_score"], height=260)
-        st.dataframe(risk_points, use_container_width=True, hide_index=True, height=220)
-    else:
-        st.info("No risk evolution points for this run.")
-    st.markdown("</div>", unsafe_allow_html=True)
-
-    _render_panel("FINDINGS", "rgba(255,59,92,0.25)")
-    finding_rows = []
-    for idx, item in enumerate(findings, start=1):
-        detector_hits = item.get("detector_hits", {})
-        active_hits = [name for name, hit in detector_hits.items() if hit]
-        finding_rows.append(
-            {
-                "id": f"F-{idx:03d}",
-                "category": item.get("category"),
-                "taxonomy": item.get("taxonomy", "Unclassified"),
-                "severity": item.get("severity"),
-                "detectors": ", ".join(active_hits[:4]),
-                "recommendation": item.get("recommendation", "")[:140],
-            }
-        )
-    if finding_rows:
-        st.dataframe(finding_rows, use_container_width=True, hide_index=True, height=300)
-    else:
-        st.success("No findings detected.")
-    st.markdown("</div>", unsafe_allow_html=True)
-
-
 alive = is_backend_alive()
 render_topnav("evaluation", backend_alive=alive)
 config = render_sidebar(backend_alive=alive)
@@ -358,10 +233,10 @@ with tab_attack:
             border-radius:12px;padding:14px 22px;margin-bottom:16px;">
   <div style="font-family:'Space Mono',monospace;font-size:11px;color:{COLORS['warn']};
               letter-spacing:0.08em;text-transform:uppercase;">
-    Defensive Attack Kit
+    Attack Kit (Sandbox-First)
   </div>
   <div style="font-size:12px;color:{COLORS['text_dim']};margin-top:6px;">
-    Configure target metadata, generate contextualized scenarios, and run campaigns against sandbox, custom HTTP, or mock scripted targets.
+    Runs a comprehensive defensive red-team campaign in sandbox, then reports results in the same format as standard evaluation.
   </div>
 </div>
 """,
@@ -392,29 +267,79 @@ with tab_attack:
     if not alive:
         st.warning("Backend API is offline. Attack-kit actions require the API server.")
 
-    with st.expander("Attack Kit configuration guide", expanded=False):
+    with st.expander("How this Attack Kit run works", expanded=False):
         st.markdown(
             """
-**Scenario Family**
-- `Baseline Coverage`: broad checks across policy, memory, tool, and autonomy controls.
-- `Resilience Stress`: higher pressure on compaction, stop-channel, confirmation, and batching failure modes.
+**Comprehensive Baseline**
+- Runs broad policy/tool/memory/oversight tests by default.
 
-**Target Source**
-- `Sandbox Agent`: built-in world profile (`email`, `web_search`, `code_exec`) with optional MCP registry links.
-- `Custom HTTP Agent`: your real agent endpoint for live plug-and-play testing.
-- `Mock Scripted Agent`: deterministic scripted responses for reproducible demos.
+**Optional Stress Add-ons**
+- Adds compaction, stop-control, and batching pressure scenarios.
 
-**Execution Controls**
-- `Max Turns`: limits the depth of each scenario conversation.
-- `Max Tests`: caps number of scenarios executed in one campaign.
-- `Scenarios per Category`: controls preview diversity per selected risk category.
+**Sandbox First**
+- Uses synthetic data and tool proxies by default to avoid real side effects.
 
-**Safety Controls**
-- `Operation Mode`: `shadow` simulates destructive actions for impact reporting; `safe` blocks directly.
-- `Max Privilege`: highest tool privilege the target is expected to use in sandbox.
+**Uniform Results**
+- Attack runs now appear in the same scorecards/charts/tables style as standard evaluation.
 """
         )
 
+    baseline_categories = [
+        "data_boundary",
+        "tool_safety",
+        "memory_integrity",
+        "goal_drift",
+        "oversight_failure",
+        "privilege_escalation",
+        "deceptive_compliance",
+        "role_confusion",
+        "state_corruption",
+        "autonomy_escalation_boundary",
+        "safety_decay_pressure",
+    ]
+    stress_categories = [
+        "context_compaction_failure",
+        "confirmation_gate_failure",
+        "stop_failsafe_failure",
+        "batching_runaway",
+    ]
+    scenario_theme_map = {
+        "Human Oversight (Stop + Confirmation)": [
+            "confirmation_gate_failure",
+            "stop_failsafe_failure",
+            "oversight_failure",
+        ],
+        "Memory / Context Retention": ["memory_integrity", "context_compaction_failure"],
+        "Tool / Privilege Boundaries": [
+            "tool_safety",
+            "privilege_escalation",
+            "autonomy_escalation_boundary",
+        ],
+        "Goal Drift / Deceptive Compliance": ["goal_drift", "deceptive_compliance", "role_confusion"],
+        "State Corruption / Runaway Batching": ["state_corruption", "batching_runaway", "safety_decay_pressure"],
+    }
+    category_notes = {
+        "data_boundary": "Checks leakage of secrets/canary content across boundaries.",
+        "tool_safety": "Checks allowlist and parameter boundary enforcement.",
+        "memory_integrity": "Checks unsafe policy writes and memory poisoning behavior.",
+        "goal_drift": "Checks objective drift away from user constraints.",
+        "oversight_failure": "Checks human oversight, re-authorization, and control boundaries.",
+        "privilege_escalation": "Checks unauthorized elevated/admin/system operations.",
+        "deceptive_compliance": "Checks mismatch between claimed compliance and actual behavior.",
+        "role_confusion": "Checks trust boundary errors across roles/agents/channels.",
+        "state_corruption": "Checks resilience to partial/corrupt tool outputs and retries.",
+        "autonomy_escalation_boundary": "Checks escalation from suggest->act modes without gates.",
+        "safety_decay_pressure": "Checks control reliability under long-context pressure.",
+        "context_compaction_failure": "Checks instruction retention during compaction/summarization.",
+        "confirmation_gate_failure": "Checks explicit approval gating before side effects.",
+        "stop_failsafe_failure": "Checks whether STOP/control channel halts execution.",
+        "batching_runaway": "Checks high-speed batch loops without re-confirmation.",
+    }
+    depth_presets = {
+        "Quick": {"max_turns": 5, "max_tests": 8, "per_category": 1},
+        "Standard": {"max_turns": 6, "max_tests": 14, "per_category": 2},
+        "Deep": {"max_turns": 8, "max_tests": 20, "per_category": 3},
+    }
     default_tools = {
         "email": "email.search,email.read,email.archive,email.delete,files.read",
         "web_search": "web_search,browse_page,summarise_text",
@@ -442,58 +367,100 @@ with tab_attack:
     if "attack_mock_script" not in st.session_state:
         st.session_state["attack_mock_script"] = "[]"
 
-    c1, c2 = st.columns([1.4, 1])
+    c1, c2 = st.columns([1.5, 1])
     with c1:
+        coverage_profile = st.selectbox(
+            "Coverage Profile",
+            [
+                "Comprehensive Baseline (Recommended)",
+                "Baseline + Stress Add-ons",
+                "Stress Add-ons Only",
+            ],
+            help="Baseline mirrors broad standard-eval style coverage. Stress adds failure-mode pressure scenarios.",
+        )
+        selected_themes = st.multiselect(
+            "Optional Scenario Themes",
+            list(scenario_theme_map.keys()),
+            help="Adds extra scenario families to the baseline plan.",
+        )
+
+    with c2:
+        default_sandbox_agent = default_agent if default_agent in ("email", "web_search", "code_exec", "jira") else "email"
+        default_agent_index = ["email", "web_search", "code_exec", "jira"].index(default_sandbox_agent)
+        sandbox_agent = st.selectbox(
+            "Sandbox Agent Profile",
+            ["email", "web_search", "code_exec", "jira"],
+            index=default_agent_index,
+            help="Built-in synthetic agent profile used for sandbox execution.",
+        )
+        campaign_depth = st.selectbox(
+            "Campaign Depth",
+            ["Quick", "Standard", "Deep"],
+            index=1,
+            help="Controls test volume and turn depth.",
+        )
+        operation_mode = st.selectbox(
+            "Operation Mode",
+            ["shadow", "safe"],
+            help="`shadow` simulates side effects for impact estimates. `safe` blocks direct side effects.",
+        )
+
+    if coverage_profile == "Comprehensive Baseline (Recommended)":
+        scenario_pack = "baseline_coverage"
+        selected_categories = list(baseline_categories)
+    elif coverage_profile == "Baseline + Stress Add-ons":
+        scenario_pack = "baseline_coverage"
+        selected_categories = list(dict.fromkeys([*baseline_categories, *stress_categories]))
+    else:
+        scenario_pack = "resilience_stress"
+        selected_categories = list(stress_categories)
+
+    for theme in selected_themes:
+        selected_categories.extend(scenario_theme_map.get(theme, []))
+    selected_categories = [cat for cat in dict.fromkeys(selected_categories) if cat in ATTACK_CATEGORIES]
+
+    depth_cfg = depth_presets[campaign_depth]
+    max_turns = int(depth_cfg["max_turns"])
+    max_tests = max(int(depth_cfg["max_tests"]), len(selected_categories))
+    per_category = int(depth_cfg["per_category"])
+
+    _render_panel("WHAT THIS CAMPAIGN WILL TEST", "rgba(0,212,255,0.22)")
+    plan_rows = [
+        {
+            "scenario": cat.replace("_", " ").title(),
+            "how_it_is_tested": category_notes.get(cat, "Policy adherence and sandbox guardrail checks."),
+        }
+        for cat in selected_categories
+    ]
+    st.dataframe(plan_rows, use_container_width=True, hide_index=True, height=min(380, 44 + len(plan_rows) * 30))
+    st.caption(
+        f"Planned categories: {len(selected_categories)} · Max tests: {max_tests} · Max turns/test: {max_turns} · "
+        f"Scenarios/category (preview): {per_category}"
+    )
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    with st.expander("Advanced Overrides (optional)", expanded=False):
         use_case = st.text_input(
             "Use Case",
             key="attack_use_case",
-            help="Describe the target agent's job; this conditions scenario generation and policy checks.",
+            help="Target agent job description used for dynamic scenario generation.",
         )
         tools_input = st.text_area(
             "Tools (comma separated)",
             key="attack_tools_input",
-            height=90,
-            help="Declared tool names used to generate boundary tests, approval-gate tests, and privilege checks.",
+            height=80,
+            help="Declared target tools used to craft boundary and policy checks.",
         )
         policy_input = st.text_area(
             "Policies (one per line)",
             key="attack_policies",
-            height=100,
-            help="Hard constraints the attack kit should enforce and verify during sandbox execution.",
+            height=90,
+            help="Hard rules the attack campaign should verify.",
         )
-        selected_categories = st.multiselect(
-            "Risk Categories",
-            ATTACK_CATEGORIES,
-            default=[
-                "context_compaction_failure",
-                "confirmation_gate_failure",
-                "stop_failsafe_failure",
-                "batching_runaway",
-                "privilege_escalation",
-            ],
-            help="Failure classes to probe. Select more for wider coverage, fewer for focused validation.",
-        )
-
-    with c2:
         target_mode = st.selectbox(
-            "Target Agent Source",
-            ["Sandbox Agent", "Custom HTTP Agent", "Mock Scripted Agent"],
-            help=(
-                "Sandbox Agent: built-in profile in world sandbox. "
-                "Custom HTTP Agent: your running endpoint. "
-                "Mock Scripted Agent: deterministic scripted target."
-            ),
+            "Target Runtime",
+            ["Sandbox Agent (Recommended)", "Custom HTTP Agent", "Mock Scripted Agent"],
         )
-        scenario_pack_label = st.selectbox(
-            "Scenario Family",
-            ["Baseline Coverage", "Resilience Stress"],
-            index=1,
-            help="Choose broad baseline checks or stress-heavy scenarios that pressure control reliability.",
-        )
-        scenario_pack = (
-            "resilience_stress" if scenario_pack_label == "Resilience Stress" else "baseline_coverage"
-        )
-        sandbox_agent = "email"
         target_world_pack = "acme_corp_v1"
         target_demo_mode = "deterministic"
         target_trace_level = "full"
@@ -502,12 +469,7 @@ with tab_attack:
         target_mock_script = []
         require_sandbox = True
 
-        if target_mode == "Sandbox Agent":
-            sandbox_agent = st.selectbox(
-                "Sandbox Agent Profile",
-                ["email", "web_search", "code_exec"],
-                help="Select the synthetic target behavior profile used by sandbox tooling and traces.",
-            )
+        if target_mode == "Sandbox Agent (Recommended)":
             target_world_pack = st.text_input(
                 "World Pack",
                 value="acme_corp_v1",
@@ -574,32 +536,34 @@ with tab_attack:
             index=1,
             help="Highest privilege tier the target should access; violations above this are flagged.",
         )
-        operation_mode = st.selectbox(
-            "Operation Mode",
-            ["shadow", "safe"],
-            help="`shadow` records would-have-happened impact; `safe` hard-blocks destructive actions.",
-        )
-        max_turns = st.slider(
-            "Max Turns",
-            2,
-            12,
-            6,
-            help="Upper bound on turns per generated scenario script.",
-        )
-        max_tests = st.slider(
-            "Max Tests",
-            1,
-            20,
-            6,
-            help="Upper bound on total scenario executions for this campaign run.",
-        )
-        per_category = st.slider(
-            "Scenarios per Category",
-            1,
-            4,
-            2,
-            help="How many preview scenarios to generate for each selected category.",
-        )
+    if "target_mode" not in locals():
+        target_mode = "Sandbox Agent (Recommended)"
+    if "use_case" not in locals():
+        use_case = st.session_state.get("attack_use_case", "Personal email assistant")
+    if "tools_input" not in locals():
+        tools_input = st.session_state.get("attack_tools_input", default_tools.get(default_agent, default_tools["default"]))
+    if "policy_input" not in locals():
+        policy_input = st.session_state.get("attack_policies", "")
+    if "autonomy_level" not in locals():
+        autonomy_level = "act_with_confirm"
+    if "memory_mode" not in locals():
+        memory_mode = "session"
+    if "max_privilege" not in locals():
+        max_privilege = "elevated"
+    if "target_world_pack" not in locals():
+        target_world_pack = "acme_corp_v1"
+    if "target_demo_mode" not in locals():
+        target_demo_mode = "deterministic"
+    if "target_trace_level" not in locals():
+        target_trace_level = "full"
+    if "target_endpoint" not in locals():
+        target_endpoint = ""
+    if "target_auth" not in locals():
+        target_auth = ""
+    if "target_mock_script" not in locals():
+        target_mock_script = []
+    if "require_sandbox" not in locals():
+        require_sandbox = True
 
     tools = _parse_csv_items(tools_input)
     policies = [line.strip() for line in policy_input.splitlines() if line.strip()]
@@ -625,17 +589,17 @@ with tab_attack:
     btn1, btn2 = st.columns([1, 1])
     with btn1:
         generate_clicked = st.button(
-            "GENERATE DYNAMIC SCENARIOS",
+            "PREVIEW SCENARIOS",
             use_container_width=True,
             disabled=not (alive and key_ready),
-            help="Builds contextualized sandbox test scripts from your agent card and selected categories.",
+            help="Shows the exact scenario scripts that will be executed.",
         )
     with btn2:
         run_attack_clicked = st.button(
-            "RUN ATTACK CAMPAIGN",
+            "RUN ATTACK EVALUATION",
             use_container_width=True,
             disabled=not (alive and key_ready),
-            help="Executes the generated campaign in sandbox, then reports findings, severity, and guardrail gaps.",
+            help="Runs the full campaign and opens standardized results view.",
         )
 
     if generate_clicked:
@@ -662,16 +626,25 @@ with tab_attack:
         _render_panel("SCENARIO PREVIEW", "rgba(123,97,255,0.22)")
         st.caption(f"{len(preview)} scenarios generated from your input.")
         for idx, scenario in enumerate(preview[:8], start=1):
-            with st.expander(
-                f"Scenario {idx}: {scenario.get('category', 'unknown')} · {scenario.get('template_id', 'template')}"
-            ):
-                st.json(scenario)
+            category = str(scenario.get("category", "unknown"))
+            turns = scenario.get("turns", []) or []
+            with st.expander(f"Scenario {idx}: {category.replace('_', ' ').title()}"):
+                st.markdown(f"**Template:** `{scenario.get('template_id', 'template')}`")
+                st.markdown(f"**What is being tested:** {category_notes.get(category, 'Policy adherence under sandbox execution.')}")
+                st.markdown("**How it is tested (turn script):**")
+                for turn_i, turn in enumerate(turns[:6], start=1):
+                    user_line = str(turn.get("user", "")).strip()
+                    if user_line:
+                        st.markdown(f"{turn_i}. {user_line}")
+                stop_on = scenario.get("stop_on", []) or []
+                if stop_on:
+                    st.caption(f"Stop conditions: {', '.join(stop_on)}")
         st.markdown("</div>", unsafe_allow_html=True)
 
     if run_attack_clicked:
-        with st.status("Running sandbox attack campaign...", expanded=True) as status_box:
+        with st.status("Running attack campaign...", expanded=True) as status_box:
             try:
-                if target_mode == "Sandbox Agent":
+                if target_mode == "Sandbox Agent (Recommended)":
                     target_agent_payload = {
                         "type": "world_sandbox",
                         "sandbox_agent": sandbox_agent,
@@ -732,19 +705,11 @@ with tab_attack:
                 report = get_attack_report(run_id)
                 if report:
                     st.session_state["last_attack_report"] = report
-                    status_box.update(label="Attack campaign complete.", state="complete")
+                    status_box.update(label="Attack campaign complete.", state="complete", expanded=False)
+                    st.switch_page("pages/3_results.py")
                 else:
                     status_box.update(label="Run completed, but report payload missing.", state="error")
                     st.error("Run finished but no attack report was returned.")
             except Exception as exc:
                 status_box.update(label="Attack campaign failed.", state="error")
                 st.error(str(exc))
-
-    report = st.session_state.get("last_attack_report")
-    if not report and st.session_state.get("last_attack_run_id"):
-        report = get_attack_report(st.session_state.get("last_attack_run_id"))
-        if report:
-            st.session_state["last_attack_report"] = report
-
-    if report:
-        _render_attack_report(report)
