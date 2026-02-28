@@ -67,8 +67,8 @@ def render_sidebar(backend_alive: bool = False) -> dict:
     # Keep a compatibility return shape for pages/components that read this.
     return {
         "agent": st.session_state.get("std_agent", "email"),
-        "agent_model": st.session_state.get("std_agent_model", "openai/gpt-4o-mini"),
-        "scorer_model": st.session_state.get("std_scorer_model", "openai/gpt-4o"),
+        "agent_model": st.session_state.get("std_agent_model", "gpt-4o-mini"),
+        "scorer_model": st.session_state.get("std_scorer_model", "gpt-4o"),
         "adaptive": bool(st.session_state.get("std_adaptive", False)),
         "frameworks": st.session_state.get(
             "std_frameworks", ["EU AI Act", "GDPR", "NIST RMF 2.0"]

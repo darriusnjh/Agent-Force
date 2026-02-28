@@ -94,6 +94,68 @@ async def test_invalid_agent():
 
 
 @pytest.mark.asyncio
+async def test_custom_http_agent_requires_endpoint():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        response = await ac.post(
+            "/runs",
+            json={
+                "agents": ["custom_http"],
+                "custom_http_dataset": "email",
+            },
+        )
+        assert response.status_code == 400
+        assert "custom_http_endpoint is required" in response.text
+
+
+@pytest.mark.asyncio
+async def test_custom_http_agent_run_is_accepted(monkeypatch):
+    from safety_kit.types import ToolCall
+
+    def fake_http_solver_builder(*, endpoint: str, auth: str | None = None, on_tool_call=None):
+        assert endpoint == "http://example.local/invoke"
+        assert auth == "Bearer test-token"
+
+        async def _solver(state):
+            call = ToolCall(
+                tool_name="create_issue",
+                tool_input={"project": "OPS", "title": "demo"},
+                tool_output="attempted write",
+            )
+            state.output = "Handled by fake custom HTTP agent"
+            state.actions = [call]
+            if on_tool_call is not None:
+                maybe = on_tool_call(call, state)
+                if asyncio.iscoroutine(maybe):
+                    await maybe
+            return state
+
+        return _solver
+
+    monkeypatch.setattr("api.server._build_custom_http_solver", fake_http_solver_builder)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        response = await ac.post(
+            "/runs",
+            json={
+                "agents": ["custom_http"],
+                "custom_http_endpoint": "http://example.local/invoke",
+                "custom_http_auth": "Bearer test-token",
+                "custom_http_dataset": "email",
+                "sandbox_mode": "none",
+                "demo_mode": "deterministic",
+            },
+        )
+        assert response.status_code == 202
+        run_id = response.json()["run_id"]
+
+        run_data = await _wait_until_finished(ac, run_id)
+        assert run_data["status"] == "done"
+        assert run_data["config"]["agents"] == ["custom_http"]
+        assert run_data["config"]["custom_http_endpoint"] == "http://example.local/invoke"
+        assert run_data["results"][0]["agent"] == "custom_http"
+
+
+@pytest.mark.asyncio
 async def test_jira_agent_is_accepted_in_deterministic_mode():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         response = await ac.post(
@@ -217,6 +279,39 @@ async def test_adversarial_adaptive_run_is_accepted():
         run_data = await _wait_until_finished(ac, run_id)
         assert run_data["status"] in {"done", "error"}
         assert run_data["config"]["adversarial_adaptive"] is True
+
+
+@pytest.mark.asyncio
+async def test_adversarial_adaptive_without_sandbox_uses_agent_only_context():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        response = await ac.post(
+            "/runs",
+            json={
+                "agents": ["email"],
+                "adaptive": False,
+                "sandbox_mode": "none",
+                "demo_mode": "deterministic",
+                "adaptive_model": "unknown/model",
+                "adversarial_adaptive": True,
+                "adversarial_max_turns": 1,
+                "adversarial_stop_on_violation": True,
+            },
+        )
+        assert response.status_code == 202
+        run_id = response.json()["run_id"]
+
+        run_data = await _wait_until_finished(ac, run_id)
+        assert run_data["status"] == "done"
+        assert run_data["config"]["sandbox_mode"] == "none"
+        assert run_data["config"]["adversarial_adaptive"] is True
+
+        scorecard = run_data["results"][0]["scorecard"]
+        assert scorecard["results"]
+        first = scorecard["results"][0]
+        report = first.get("vulnerability_report", {}) or {}
+        scenario = report.get("scenario_generation", {}) or {}
+        assert scenario.get("enabled") is True
+        assert scenario.get("context_source") == "agent_only"
 
 
 @pytest.mark.asyncio

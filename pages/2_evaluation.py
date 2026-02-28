@@ -1,4 +1,4 @@
-# ── pages/2_evaluation.py ────────────────────────────────────────────────────
+﻿# â”€â”€ pages/2_evaluation.py â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 import json
 import os
 import sys
@@ -10,11 +10,8 @@ from dotenv import load_dotenv
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from api_client import (
-    generate_attack_scenarios,
-    get_attack_report,
     get_scenarios,
     is_backend_alive,
-    start_attack_run,
     start_run,
     stream_run,
 )
@@ -49,21 +46,29 @@ ATTACK_CATEGORIES = [
     "batching_runaway",
 ]
 
-STANDARD_AGENT_OPTIONS = ["email", "web_search", "code_exec", "jira"]
+STANDARD_AGENT_OPTIONS = ["email", "web_search", "code_exec", "jira", "custom_http"]
+STANDARD_CUSTOM_DATASET_OPTIONS = ["email", "web_search", "code_exec", "jira"]
 STANDARD_AGENT_MODEL_OPTIONS = [
-    "openai/gpt-5.3",
-    "openai/gpt-4o",
-    "openai/gpt-4o-mini",
-    "groq/llama-3.1-8b-instant",
-    "ollama/llama3.2",
-    "gemini/gemini-1.5-flash",
+    "gpt-5.2",
+    "gpt-5.2-pro",
+    "gpt-5-mini",
+    "gpt-5-nano",
+    "gpt-4.1",
+    "gpt-4.1-mini",
+    "gpt-4.1-nano",
+    "gpt-4o",
+    "gpt-4o-mini",
 ]
 STANDARD_JUDGE_MODEL_OPTIONS = [
-    "openai/gpt-5.3",
-    "openai/gpt-4o",
-    "openai/gpt-4o-mini",
-    "anthropic/claude-3-5-sonnet",
-    "groq/llama-3.1-70b-versatile",
+    "gpt-5.2",
+    "gpt-5.2-pro",
+    "gpt-5-mini",
+    "gpt-5-nano",
+    "gpt-4.1",
+    "gpt-4.1-mini",
+    "gpt-4.1-nano",
+    "gpt-4o",
+    "gpt-4o-mini",
 ]
 
 
@@ -197,7 +202,7 @@ def _render_attack_report(report: dict):
         color = COLORS["safe"] if passed else COLORS["danger"]
         mark = "PASS" if passed else "FAIL"
         st.markdown(
-            f"<div style='font-size:13px;margin:4px 0;color:{color};'><b>{mark}</b> — {label}</div>",
+            f"<div style='font-size:13px;margin:4px 0;color:{color};'><b>{mark}</b> â€” {label}</div>",
             unsafe_allow_html=True,
         )
     st.caption(f"Blocked tool calls: {guardrail.get('blocked_tool_calls', 0)}")
@@ -210,7 +215,7 @@ def _render_attack_report(report: dict):
     with s2:
         st.metric("Max Tool Calls / Turn", stress.get("max_tool_calls_in_turn", 0))
     with s3:
-        st.metric("Low→High Decay", str(decay.get("decay_delta_low_to_high")))
+        st.metric("Lowâ†’High Decay", str(decay.get("decay_delta_low_to_high")))
 
     pressure_scores = decay.get("security_score_by_pressure", {})
     pressure_rows = []
@@ -265,7 +270,7 @@ render_page_header("Run Evaluation", "Evaluation", (COLORS["accent2"], COLORS["a
 
 scenarios = get_scenarios()
 env_openai_key = os.getenv("OPENAI_API_KEY", "").strip()
-tab_standard, tab_attack = st.tabs(["Standard Evaluation", "Attack Kit"])
+tab_standard = st.container()
 
 with tab_standard:
     _render_panel("STANDARD EVALUATION CONFIGURATION", "rgba(0,212,255,0.2)")
@@ -275,7 +280,7 @@ with tab_standard:
             "Agent Under Test",
             STANDARD_AGENT_OPTIONS,
             key="std_agent",
-            help="Built-in agent profile to evaluate.",
+            help="Built-in profile or `custom_http` for a plug-and-play endpoint.",
         )
     with cfg2:
         std_agent_model = st.selectbox(
@@ -291,6 +296,31 @@ with tab_standard:
             key="std_scorer_model",
             help="Model used by the safety judge/scorer.",
         )
+
+    std_custom_http_endpoint = ""
+    std_custom_http_auth = ""
+    std_custom_http_dataset = "email"
+    if std_agent == "custom_http":
+        custom1, custom2, custom3 = st.columns(3)
+        with custom1:
+            std_custom_http_endpoint = st.text_input(
+                "Custom HTTP Endpoint",
+                key="std_custom_http_endpoint",
+                help="Agent endpoint to call for each scenario (e.g., http://127.0.0.1:9000/invoke).",
+            )
+        with custom2:
+            std_custom_http_auth = st.text_input(
+                "Authorization Header (optional)",
+                key="std_custom_http_auth",
+                help="Sent as the HTTP Authorization header (e.g., Bearer <token>).",
+            )
+        with custom3:
+            std_custom_http_dataset = st.selectbox(
+                "Scenario Profile",
+                STANDARD_CUSTOM_DATASET_OPTIONS,
+                key="std_custom_http_dataset",
+                help="Which built-in safety scenario set to run against your custom agent endpoint.",
+            )
 
     cfg4, cfg5, cfg6 = st.columns(3)
     with cfg4:
@@ -323,7 +353,7 @@ with tab_standard:
         help="Displayed for run planning. Current backend uses one execution pass.",
     )
 
-    cfg9, cfg10, cfg11 = st.columns(3)
+    cfg9, cfg10, cfg11, cfg12 = st.columns(4)
     with cfg9:
         std_adversarial_adaptive = st.toggle(
             "Adversarial Adaptive Mode",
@@ -353,6 +383,18 @@ with tab_standard:
             key="std_adversarial_stop_on_violation",
             help="Stop the attacker-target interaction as soon as a violation is detected.",
         )
+    with cfg12:
+        
+        std_enable_sandbox = st.toggle(
+            "Enable Sandbox",
+            value=True,
+            key="std_enable_sandbox",
+            help=(
+                "Enable world sandbox context. Disable to run with sandbox_mode='none' "
+                "and use agent-only email scenario generation."
+            ),
+        )
+    std_sandbox_mode = "world_stateful" if std_enable_sandbox else "none"
 
     std_openai_api_key = st.text_input(
         "OpenAI API Key (optional)",
@@ -369,6 +411,10 @@ with tab_standard:
         "agent": std_agent,
         "agent_model": std_agent_model,
         "scorer_model": std_scorer_model,
+        "sandbox_mode": std_sandbox_mode,
+        "custom_http_endpoint": std_custom_http_endpoint,
+        "custom_http_auth": std_custom_http_auth,
+        "custom_http_dataset": std_custom_http_dataset,
         "adaptive": std_adaptive,
         "epochs": std_epochs,
         "max_rounds": std_max_rounds,
@@ -387,9 +433,9 @@ with tab_standard:
     with col_main:
         status_color = COLORS["safe"] if alive else COLORS["warn"]
         status_msg = (
-            "Backend connected — live evaluation available"
+            "Backend connected â€” live evaluation available"
             if alive
-            else "Demo mode — mock evaluation with animated progress"
+            else "Demo mode â€” mock evaluation with animated progress"
         )
 
         st.markdown(
@@ -455,8 +501,8 @@ with tab_standard:
             line.strip() for line in (std_mcp_links_raw or "").splitlines() if line.strip()
         ]
 
-        if not run_clicked:
-            _render_panel(f"SCENARIO QUEUE — {len(scenarios)} TESTS READY", "rgba(0,212,255,0.18)")
+        if not run_clicked and not adaptive_run:
+            _render_panel(f"SCENARIO QUEUE â€” {len(scenarios)} TESTS READY", "rgba(0,212,255,0.18)")
             render_scenario_queue(scenarios, running=False)
             st.markdown("</div>", unsafe_allow_html=True)
 
@@ -465,6 +511,10 @@ with tab_standard:
 
             if std_mcp_server_args is None:
                 st.error("Fix MCP argument format before starting the run.")
+            elif std_config.get("agent") == "custom_http" and not str(
+                std_config.get("custom_http_endpoint", "")
+            ).strip():
+                st.error("Custom HTTP Endpoint is required when Agent Under Test is `custom_http`.")
             elif alive:
                 with st.status("Initializing Agent-Force Engine...", expanded=True) as status_box:
                     run_id = start_run(
@@ -472,6 +522,7 @@ with tab_standard:
                         adaptive=std_config.get("adaptive", False),
                         agent_model=std_config.get("agent_model"),
                         scorer_model=std_config.get("scorer_model"),
+                        sandbox_mode=std_config.get("sandbox_mode", "world_stateful"),
                         max_rounds=std_config.get("max_rounds", 3),
                         samples_per_round=std_config.get("samples_per_round", 4),
                         adversarial_adaptive=bool(std_config.get("adversarial_adaptive", False)),
@@ -483,6 +534,21 @@ with tab_standard:
                         mcp_server_urls=std_mcp_server_urls,
                         mcp_server_command=(std_mcp_server_command or "").strip() or None,
                         mcp_server_args=std_mcp_server_args or [],
+                        custom_http_endpoint=(
+                            str(std_config.get("custom_http_endpoint", "")).strip() or None
+                            if std_config.get("agent") == "custom_http"
+                            else None
+                        ),
+                        custom_http_auth=(
+                            str(std_config.get("custom_http_auth", "")).strip() or None
+                            if std_config.get("agent") == "custom_http"
+                            else None
+                        ),
+                        custom_http_dataset=(
+                            str(std_config.get("custom_http_dataset", "email")).strip() or "email"
+                            if std_config.get("agent") == "custom_http"
+                            else None
+                        ),
                         openai_api_key=std_config.get("openai_api_key"),
                     )
 
