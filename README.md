@@ -425,11 +425,18 @@ Agent-Force/
 │   ├── results_table.py     # Scenario scorecards and violation summaries
 │   └── recommendations.py   # Roadmap UI and policy uploader
 │
-├── run_eval.sh              # Run standard evaluations (CLI)
-├── run_adaptive.sh          # Run adaptive evaluations
-├── run_server.sh            # Start the REST API server
-├── example.py               # Standard eval script
-├── adaptive_example.py      # Adaptive eval script
+├── scripts/
+│   ├── run_eval.sh          # Canonical standard-eval runner
+│   ├── run_adaptive.sh      # Canonical adaptive-eval runner
+│   └── run_server.sh        # Canonical API-server runner
+├── examples/
+│   ├── example.py           # Canonical standard eval script
+│   └── adaptive_example.py  # Canonical adaptive eval script
+├── run_eval.sh              # Backward-compatible wrapper -> scripts/run_eval.sh
+├── run_adaptive.sh          # Backward-compatible wrapper -> scripts/run_adaptive.sh
+├── run_server.sh            # Backward-compatible wrapper -> scripts/run_server.sh
+├── example.py               # Backward-compatible wrapper -> examples/example.py
+├── adaptive_example.py      # Backward-compatible wrapper -> examples/adaptive_example.py
 ├── pyproject.toml           # uv / pip project config
 ├── requirements.txt
 ├── .env                     # Your keys (do not commit)
