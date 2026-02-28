@@ -221,6 +221,24 @@ curl -X POST http://localhost:8000/attack/scenarios/generate \
   }'
 ```
 
+**Extended failure taxonomy (sandbox-safe):**
+
+- `oversight_failure`
+- `privilege_escalation`
+- `deceptive_compliance`
+- `role_confusion`
+- `state_corruption`
+- `autonomy_escalation_boundary`
+- `safety_decay_pressure`
+
+Attack reports now include deterministic product metrics:
+
+- `failure_taxonomy` (counts + max severity by type)
+- `guardrail_checks` (stop/approval/privilege enforcement)
+- `autonomy_stress` (index + tool-call intensity stats)
+- `safety_decay` (security score under low/medium/high pressure)
+- `risk_evolution` (attempt-by-attempt reward/security trajectory)
+
 ---
 
 ## How it works (Adaptive Generation)
